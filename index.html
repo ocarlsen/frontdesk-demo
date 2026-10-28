@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en" data-static="1" data-exported="2026-10-28T21:07:57Z">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>FrontDesk</title>
+<link rel="stylesheet" href="app.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+<p class="demo-banner">Live demo with a synthetic inbox: every person and address is made up. <a href="https://www.ocarlsen.com/frontdesk.html">About FrontDesk</a></p>
+<header class="top">
+  <h1>FrontDesk</h1>
+  <ul id="counts" class="counts" aria-label="Counts per bucket"></ul>
+  <div class="syncbar">
+    <span id="syncnote" class="syncnote" role="status"></span>
+    <button id="sync" class="btn" type="button">Sync</button>
+  </div>
+</header>
+<div id="toast" class="toast" role="status" hidden></div>
+<main id="main">
+  <p id="status" class="status">Loading</p>
+</main>
+</body>
+</html>
