@@ -147,10 +147,14 @@ function buildDetail(item, triage) {
   const hint = el("p", "hint");
   const save = el("button", "btn primary", "Save as Gmail draft");
   save.type = "button";
+  const send = el("button", "btn send", "Send...");
+  send.type = "button";
+  send.addEventListener("click", () => startSend(item, ta, send));
   const refresh = () => {
     // Placeholders like [time that works] mark facts only the owner knows; never save them.
     const open = ta.value.match(/\[[^\]\n]{1,80}\]/g) || [];
     save.disabled = !ta.value.trim() || open.length > 0;
+    send.disabled = save.disabled;
     hint.textContent = open.length ? "Fill in " + open.join(", ") + " before saving." : "";
   };
   ta.addEventListener("input", refresh);
@@ -169,7 +173,7 @@ function buildDetail(item, triage) {
     setTimeout(() => { copy.textContent = "Copy"; }, 1800);
   });
   reply.append(label, ta, hint);
-  actions.append(save, copy);
+  actions.append(save, send, copy);
   if (triage) {
     const moveTo = el("span", "moveto");
     moveTo.append(el("span", "kbdhint", "Move to"));
@@ -257,6 +261,15 @@ async function postAction(kind, itemId, extra) {
     if (kind === "unarchive") staticHidden.delete(itemId);
     if (kind === "relabel") staticLabels.set(itemId, extra.bucket);
     if (kind === "profile") throw new Error("demo mode");
+    if (kind === "send_prepare") {
+      const it = (window.__items || []).find(r => r.item.id === itemId);
+      const inbound = it ? it.item.messages.filter(m => !m.is_mine) : [];
+      const to = inbound.length ? parseSender(inbound[inbound.length - 1].sender).addr : "";
+      return { action_id: 1, to: to ? [to] : [], cc: [], demo: true,
+               subject: "Re: " + (it ? it.item.subject : ""), body: extra.body };
+    }
+    if (kind === "send_confirm") return { status: "queued", demo: true, undo_seconds: 30 };
+    if (kind === "send_cancel") return { status: "cancelled" };
     if (kind === "draft") return { status: "done", demo: true, note: "Demo: nothing was saved to Gmail." };
     return { status: "done" };
   }
@@ -283,6 +296,98 @@ function toast(text, undoLabel, onUndo) {
   t.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { t.hidden = true; }, 10000);
+}
+
+// ---- Send: prepare (server derives recipients from the thread) -> the owner confirms exactly
+// what will go out -> it leaves after the undo window unless cancelled.
+async function startSend(item, ta, btn) {
+  btn.disabled = true;
+  let prep;
+  try {
+    prep = await postAction("send_prepare", item.id,
+                            { body: ta.value, seen_updated_at: item.updated_at });
+  } catch (e) {
+    btn.disabled = false;
+    toast("Can't send: " + e.message);
+    return;
+  }
+  const panel = document.getElementById("profilepanel");
+  panel.setAttribute("aria-label", "Confirm send");
+  const box = el("div", "helpbox");
+  box.append(el("h2", null, prep.demo ? "Send (demo: nothing will be sent)" : "Send this reply?"));
+  const dl = el("dl", "sendmeta");
+  dl.append(el("dt", null, "To"), el("dd", null, prep.to.join(", ") || "(nobody)"));
+  if (prep.cc && prep.cc.length) dl.append(el("dt", null, "Cc"), el("dd", null, prep.cc.join(", ")));
+  dl.append(el("dt", null, "Subject"), el("dd", null, prep.subject));
+  box.append(dl, el("pre", "sendbody", prep.body));
+  box.append(el("p", "kbdhint", "It leaves 30 seconds after you confirm; you can undo until then."));
+  const go = el("button", "btn primary", "Send");
+  go.type = "button";
+  const back = el("button", "btn", "Cancel");
+  back.type = "button";
+  const row = el("div", "actions");
+  row.append(go, back);
+  box.append(row);
+  panel.replaceChildren(box);
+  panel.hidden = false;
+  back.addEventListener("click", async () => {
+    panel.hidden = true;
+    btn.disabled = false;
+    try { await postAction("send_cancel", item.id, { action_id: prep.action_id }); } catch (e) {}
+  });
+  go.addEventListener("click", async () => {
+    go.disabled = true;
+    try {
+      const c = await postAction("send_confirm", item.id, { action_id: prep.action_id });
+      panel.hidden = true;
+      sendCountdown(item, prep.action_id, c, btn);
+    } catch (e) {
+      go.disabled = false;
+      toast("Send failed: " + e.message);
+    }
+  });
+  go.focus();
+}
+
+function sendCountdown(item, actionId, c, btn) {
+  let left = c.undo_seconds || 30;
+  let undone = false;
+  const tick = () => {
+    if (undone) return;
+    if (left <= 0) { finishSend(item, actionId, c, btn); return; }
+    toast((c.demo ? "Demo: sending in " : "Sending in ") + left + "s", "Undo", async () => {
+      undone = true;
+      try {
+        await postAction("send_cancel", item.id, { action_id: actionId });
+        toast("Not sent. Your text is still in the box.");
+        btn.disabled = false;
+      } catch (e) {
+        toast("Too late to undo: " + e.message);
+      }
+    });
+    left -= 1;
+    setTimeout(tick, 1000);
+  };
+  tick();
+}
+
+async function finishSend(item, actionId, c, btn) {
+  if (c.demo) { toast("Demo: nothing was sent."); btn.textContent = "Sent (demo)"; return; }
+  for (let i = 0; i < 30; i++) {
+    const res = await fetch("/api/send-status?id=" + actionId, { cache: "no-store" });
+    const s = res.ok ? await res.json() : { status: "unknown" };
+    if (s.status === "sent") { toast("Sent."); btn.textContent = "Sent"; return; }
+    if (["failed", "stale", "expired", "unknown", "cancelled"].includes(s.status)) {
+      const why = { failed: "Gmail refused it", stale: "a new message arrived first",
+                    expired: "it waited too long", unknown: "Gmail did not answer; check Sent",
+                    cancelled: "it was cancelled" }[s.status];
+      toast("Not confirmed sent: " + why + ".");
+      btn.disabled = false;
+      return;
+    }
+    await new Promise(r => setTimeout(r, 2000));
+  }
+  toast("Still sending; check Gmail's Sent folder.");
 }
 
 async function saveDraft(item, ta, btn) {
@@ -445,6 +550,7 @@ async function load() {
         return r;
       });
     }
+    window.__items = rows;
     render(rows);
     const again = visibleCards().find(li => li.dataset.id === currentId);
     if (again) again.classList.add("current");
@@ -483,6 +589,7 @@ async function syncNow() {
 // ---- Profile: a few sentences in the owner's words that the model treats as trusted context.
 async function openProfile() {
   const panel = document.getElementById("profilepanel");
+  panel.setAttribute("aria-label", "Your profile");
   const box = el("div", "helpbox");
   box.append(el("h2", null, "Your profile"));
   box.append(el("p", "kbdhint",

@@ -169,3 +169,9 @@ li.card.current { box-shadow: inset 3px 0 0 var(--accent); }
 .detail .summary { font-size: 1.02em; line-height: 1.55; margin: 6px 0 12px; color: var(--text);
   white-space: pre-wrap; }
 .fullthread > summary { cursor: pointer; color: var(--accent); font-size: .9em; margin: 4px 0 8px; }
+
+.sendmeta { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0 0 10px; }
+.sendmeta dt { color: var(--muted); }
+.sendmeta dd { margin: 0; overflow-wrap: anywhere; }
+.sendbody { white-space: pre-wrap; font: inherit; background: var(--bg); border: 1px solid var(--line);
+  border-radius: 6px; padding: 10px; max-height: 40vh; overflow: auto; margin: 0 0 8px; }
