@@ -16,6 +16,7 @@ const GMAIL_PREFIX = "https://mail.google.com/";
 const STATIC = document.documentElement.dataset.static === "1";
 const EXPORTED = Date.parse(document.documentElement.dataset.exported || "");
 const staticHidden = new Set();
+const staticLabels = new Map();   // item id -> bucket the visitor moved it to
 
 function staticFile(itemId) {
   return itemId.replace(/[^A-Za-z0-9]/g, "-");
@@ -150,7 +151,19 @@ function buildDetail(item, triage) {
   });
   reply.append(label, ta, hint);
   actions.append(save, copy);
-  const arch = el("button", "btn", "Archive");
+  if (triage) {
+    const moveTo = el("span", "moveto");
+    moveTo.append(el("span", "kbdhint", "Move to"));
+    for (const [b, name] of [["needs_you", "Needs you"], ["fyi", "FYI"], ["ignore", "Ignore"]]) {
+      if (b === triage.bucket) continue;
+      const mb = el("button", "btn small", name);
+      mb.type = "button";
+      mb.addEventListener("click", () => relabel(item, b, name, mb));
+      moveTo.append(mb);
+    }
+    actions.append(moveTo);
+  }
+  const arch = el("button", "btn btn-archive", "Archive");
   arch.type = "button";
   arch.addEventListener("click", () => archive(item, arch));
   actions.append(arch);
@@ -168,8 +181,12 @@ function buildDetail(item, triage) {
   return d;
 }
 
+const cardItems = new WeakMap();   // li -> item, for keyboard actions
+
 function buildCard(item, triage) {
   const li = el("li", "card");
+  li.dataset.id = item.id;
+  cardItems.set(li, item);
   const row = el("button", "row");
   row.type = "button";
   row.setAttribute("aria-expanded", "false");
@@ -219,6 +236,8 @@ async function postAction(kind, itemId, extra) {
   if (STATIC) {
     if (kind === "archive") staticHidden.add(itemId);
     if (kind === "unarchive") staticHidden.delete(itemId);
+    if (kind === "relabel") staticLabels.set(itemId, extra.bucket);
+    if (kind === "profile") throw new Error("demo mode");
     if (kind === "draft") return { status: "done", demo: true, note: "Demo: nothing was saved to Gmail." };
     return { status: "done" };
   }
@@ -269,6 +288,18 @@ async function saveDraft(item, ta, btn) {
   }
 }
 
+async function relabel(item, bucket, name, btn) {
+  btn.disabled = true;
+  try {
+    await postAction("relabel", item.id, { bucket });
+    await load();
+    toast("Moved to " + name + ". FrontDesk keeps your call as a private label.");
+  } catch (e) {
+    btn.disabled = false;
+    toast("Move failed: " + e.message);
+  }
+}
+
 async function archive(item, btn) {
   btn.disabled = true;
   try {
@@ -298,7 +329,8 @@ function whyPanel(t) {
   const cost = t.cost_usd === null || t.cost_usd === undefined ? "n/a"
     : "$" + Number(t.cost_usd).toFixed(4);
   const rows = [
-    ["Decision", t.bucket.replace("_", " ") + ", urgency " + t.urgency + " of 5 (" + band + ")"],
+    ["Decision", t.bucket.replace("_", " ") + ", urgency " + t.urgency + " of 5 (" + band + ")"
+      + (t.model_bucket ? "; you moved it here (the model said " + t.model_bucket.replace("_", " ") + ")" : "")],
     ["Reason", t.reason],
     ["Model", t.model_served || t.model],
     ["Prompt version", t.prompt_version || "unknown"],
@@ -386,10 +418,17 @@ async function load() {
         r.item.updated_at = shiftIso(r.item.updated_at, delta);
         for (const m of r.item.messages) m.sent_at = shiftIso(m.sent_at, delta);
         if (r.triage) r.triage.triaged_at = shiftIso(r.triage.triaged_at, delta);
+        const moved = staticLabels.get(r.item.id);
+        if (r.triage && moved && moved !== r.triage.bucket) {
+          r.triage.model_bucket = r.triage.model_bucket || r.triage.bucket;
+          r.triage.bucket = moved;
+        }
         return r;
       });
     }
     render(rows);
+    const again = visibleCards().find(li => li.dataset.id === currentId);
+    if (again) again.classList.add("current");
   } catch (e) {
     status.textContent = "Could not load items: " + e.message;
   }
@@ -422,7 +461,165 @@ async function syncNow() {
   }
 }
 
+// ---- Profile: a few sentences in the owner's words that the model treats as trusted context.
+async function openProfile() {
+  const panel = document.getElementById("profilepanel");
+  const box = el("div", "helpbox");
+  box.append(el("h2", null, "Your profile"));
+  box.append(el("p", "kbdhint",
+    "Tell FrontDesk what matters to you, in a few sentences. It is added to the model's " +
+    "instructions as trusted context (your mail never is). Saving re-ranks on the next Sync."));
+  const ta = el("textarea");
+  ta.rows = 6;
+  ta.maxLength = 2000;
+  ta.placeholder = "For example: I'm job hunting, so recruiter mail is at least FYI. " +
+    "Invoices from my landlord are always needs you.";
+  const status = el("p", "kbdhint");
+  const save = el("button", "btn primary", "Save");
+  save.type = "button";
+  const cancel = el("button", "btn", "Close");
+  cancel.type = "button";
+  cancel.addEventListener("click", () => { panel.hidden = true; });
+  const row = el("div", "actions");
+  row.append(save, cancel);
+  box.append(ta, status, row);
+  panel.replaceChildren(box);
+  panel.hidden = false;
+  try {
+    const res = await fetch(STATIC ? "api/profile.json" : "/api/profile", { cache: "no-store" });
+    const out = await res.json();
+    ta.value = out.profile || "";
+    if (out.demo) {
+      save.disabled = true;
+      ta.readOnly = true;
+      status.textContent = "Demo: the profile is off here. In your own copy, edit it above.";
+    }
+  } catch (e) {
+    status.textContent = "Could not load the profile: " + e.message;
+  }
+  save.addEventListener("click", async () => {
+    save.disabled = true;
+    try {
+      await postAction("profile", "", { text: ta.value });
+      status.textContent = "Saved. Click Sync to re-rank with it.";
+    } catch (e) {
+      status.textContent = "Save failed: " + e.message;
+    } finally {
+      save.disabled = false;
+    }
+  });
+  ta.focus();
+}
+
+// ---- Keyboard shortcuts, after Gmail's: j/k move, o or Enter open, u close, e archive,
+// r reply, ? help. Never while typing in a box, and never with Ctrl/Cmd/Alt held.
+const SHORTCUTS = [
+  ["j / k", "Next / previous thread"],
+  ["o or Enter", "Open or close the thread"],
+  ["u", "Close the thread"],
+  ["e", "Archive"],
+  ["r", "Reply (jump to the reply box)"],
+  ["?", "Show or hide this list"],
+  ["Esc", "Leave the reply box / close this list"],
+];
+let currentId = null;
+
+function visibleCards() {
+  return [...document.querySelectorAll("main .list > li.card")].filter(li => li.offsetParent !== null);
+}
+
+function setCurrent(li) {
+  for (const c of document.querySelectorAll("li.card.current")) c.classList.remove("current");
+  if (!li) { currentId = null; return; }
+  li.classList.add("current");
+  currentId = li.dataset.id;
+  li.scrollIntoView({ block: "nearest" });
+}
+
+function currentCard() {
+  const cards = visibleCards();
+  return cards.find(li => li.dataset.id === currentId) || null;
+}
+
+function move(step) {
+  const cards = visibleCards();
+  if (!cards.length) return;
+  const i = cards.findIndex(li => li.dataset.id === currentId);
+  const next = i < 0 ? (step > 0 ? 0 : cards.length - 1)
+    : Math.max(0, Math.min(cards.length - 1, i + step));
+  setCurrent(cards[next]);
+}
+
+function isOpen(li) {
+  return li.querySelector(":scope > .row").getAttribute("aria-expanded") === "true";
+}
+
+function toggleHelp(force) {
+  const h = document.getElementById("help");
+  h.hidden = force === undefined ? !h.hidden : !force;
+}
+
+function buildHelp() {
+  const h = document.getElementById("help");
+  const box = el("div", "helpbox");
+  box.append(el("h2", null, "Keyboard shortcuts"));
+  const dl = el("dl");
+  for (const [k, v] of SHORTCUTS) dl.append(el("dt", null, k), el("dd", null, v));
+  box.append(dl);
+  h.replaceChildren(box);
+  h.addEventListener("click", e => { if (e.target === h) toggleHelp(false); });
+}
+
+function onKey(e) {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const t = e.target;
+  const typing = t && (t.tagName === "TEXTAREA" || t.tagName === "INPUT" ||
+                       t.tagName === "SELECT" || t.isContentEditable);
+  if (e.key === "Escape") {
+    if (typing) t.blur();
+    toggleHelp(false);
+    document.getElementById("profilepanel").hidden = true;
+    return;
+  }
+  if (typing) return;
+  const li = currentCard();
+  switch (e.key) {
+    case "j": move(1); break;
+    case "k": move(-1); break;
+    case "o":
+      if (li) li.querySelector(":scope > .row").click();
+      break;
+    case "Enter":
+      if (li && !(t && t.tagName === "BUTTON")) li.querySelector(":scope > .row").click();
+      else return;   // a focused button handles Enter itself
+      break;
+    case "u":
+      if (li && isOpen(li)) li.querySelector(":scope > .row").click();
+      break;
+    case "e":
+      if (li && cardItems.get(li)) {
+        const btn = li.querySelector(".actions .btn-archive") || el("button");
+        move(1);
+        archive(cardItems.get(li), btn);
+      }
+      break;
+    case "r":
+      if (li) {
+        if (!isOpen(li)) li.querySelector(":scope > .row").click();
+        const ta = li.querySelector("textarea");
+        if (ta) { ta.focus(); ta.scrollIntoView({ block: "center" }); }
+      }
+      break;
+    case "?": toggleHelp(); break;
+    default: return;
+  }
+  e.preventDefault();
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("sync").addEventListener("click", syncNow);
+  document.getElementById("profile").addEventListener("click", openProfile);
+  buildHelp();
+  document.addEventListener("keydown", onKey);
   load();
 });

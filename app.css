@@ -147,3 +147,21 @@ details > .linkbtn { display: block; margin: 0 0 6px auto; }
 .demo-banner { margin: 0; padding: 8px 16px; text-align: center; font-size: .88em;
   background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--text); }
 .demo-banner a { color: var(--accent); }
+
+li.card.current { box-shadow: inset 3px 0 0 var(--accent); }
+.help { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center;
+  background: rgba(0,0,0,.35); padding: 16px; }
+.help[hidden] { display: none; }
+.helpbox { background: var(--card); color: var(--text); border-radius: 10px; padding: 18px 22px;
+  max-width: 420px; width: 100%; box-shadow: 0 10px 40px rgba(0,0,0,.3); }
+.helpbox h2 { margin: 0 0 10px; font-size: 1rem; }
+.helpbox dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; }
+.helpbox dt { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .9em; }
+.helpbox dd { margin: 0; color: var(--muted); }
+.kbdhint { color: var(--muted); font-size: .8em; }
+
+.moveto { display: inline-flex; align-items: center; gap: 6px; margin-right: 6px; }
+.btn.small { padding: 4px 10px; font-size: .85em; }
+
+.helpbox textarea { width: 100%; box-sizing: border-box; font: inherit; padding: 8px;
+  border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--text); }

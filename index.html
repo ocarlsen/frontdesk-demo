@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-static="1" data-exported="2026-10-28T21:07:57Z">
+<html lang="en" data-static="1" data-exported="2026-10-28T21:12:53Z">
 <head>
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
@@ -16,10 +16,14 @@
   <ul id="counts" class="counts" aria-label="Counts per bucket"></ul>
   <div class="syncbar">
     <span id="syncnote" class="syncnote" role="status"></span>
+    <span class="kbdhint">Press ? for shortcuts</span>
+    <button id="profile" class="btn" type="button">Profile</button>
     <button id="sync" class="btn" type="button">Sync</button>
   </div>
 </header>
 <div id="toast" class="toast" role="status" hidden></div>
+<div id="help" class="help" role="dialog" aria-label="Keyboard shortcuts" hidden></div>
+<div id="profilepanel" class="help" role="dialog" aria-label="Your profile" hidden></div>
 <main id="main">
   <p id="status" class="status">Loading</p>
 </main>
