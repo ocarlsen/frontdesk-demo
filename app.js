@@ -101,20 +101,39 @@ function buildDetail(item, triage) {
   const d = el("div", "detail");
   const msgs = Array.isArray(item.messages) ? item.messages : [];
   d.append(el("h2", "thread-subject", item.subject || "(no subject)"));
-  msgs.forEach((m, i) => {
-    const box = el("div", m.is_mine ? "msg mine" : "msg");
-    const head = el("div", "msg-head");
-    const who = parseSender(m.sender);
-    const avatar = el("span", "avatar", (who.name.trim()[0] || "?").toUpperCase());
-    const ident = el("div", "ident");
-    const line = el("div", "who");
-    line.append(el("span", "from", who.name));
-    if (who.addr && who.addr !== who.name) line.append(el("span", "addr", "<" + who.addr + ">"));
-    ident.append(line);
-    head.append(avatar, ident, el("span", "at", gmailTime(m.sent_at)));
-    box.append(head, m.has_html ? messageFrame(item.id, i) : el("p", "body", m.body || ""));
-    d.append(box);
-  });
+  // Summary first: the point of FrontDesk is not having to read the thread. The full thread is
+  // one click away and built on first open (its iframes size themselves only when visible).
+  const summary = triage && triage.summary ? triage.summary : "";
+  if (summary) d.append(el("p", "summary", summary));
+  const full = el("details", "fullthread");
+  const people = new Set(msgs.map(m => parseSender(m.sender).name));
+  full.append(el("summary", null, (summary ? "Show full thread" : "Thread") + " (" + msgs.length +
+    (msgs.length === 1 ? " message" : " messages") + ", " + people.size +
+    (people.size === 1 ? " person)" : " people)")));
+  const thread = el("div", "thread");
+  full.append(thread);
+  let built = false;
+  const buildThread = () => {
+    if (built) return;
+    built = true;
+    msgs.forEach((m, i) => {
+      const box = el("div", m.is_mine ? "msg mine" : "msg");
+      const head = el("div", "msg-head");
+      const who = parseSender(m.sender);
+      const avatar = el("span", "avatar", (who.name.trim()[0] || "?").toUpperCase());
+      const ident = el("div", "ident");
+      const line = el("div", "who");
+      line.append(el("span", "from", who.name));
+      if (who.addr && who.addr !== who.name) line.append(el("span", "addr", "<" + who.addr + ">"));
+      ident.append(line);
+      head.append(avatar, ident, el("span", "at", gmailTime(m.sent_at)));
+      box.append(head, m.has_html ? messageFrame(item.id, i) : el("p", "body", m.body || ""));
+      thread.append(box);
+    });
+  };
+  full.addEventListener("toggle", () => { if (full.open) buildThread(); });
+  if (!summary) { full.open = true; buildThread(); }
+  d.append(full);
   const reply = el("div", "reply");
   const actions = el("div", "actions");
   const proposed = triage && triage.proposed_reply ? triage.proposed_reply : "";
