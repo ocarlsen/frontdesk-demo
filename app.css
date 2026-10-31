@@ -42,6 +42,14 @@ body {
   color: var(--muted); font-size: 13px; }
 .counts b { color: var(--text); font-weight: 600; }
 main { max-width: 860px; margin: 0 auto; padding: 0 16px 48px; }
+/* Search: its own full-width row under the header line. */
+.top .search { flex: 1 1 100%; box-sizing: border-box; height: 38px; padding: 0 12px; font: inherit;
+  font-size: 15px; color: var(--text); background: var(--card); border: 1px solid var(--line);
+  border-radius: 8px; }
+.top .search:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.searchres h3 { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase;
+  letter-spacing: .04em; margin: 18px 0 8px; }
+.card.result .dot { box-shadow: inset 0 0 0 1.5px var(--u1); background: transparent; }
 .status { color: var(--muted); }
 .status code { background: var(--card); padding: 2px 6px; border-radius: 4px; }
 section { margin-top: 22px; }
@@ -58,7 +66,9 @@ section > details > summary { cursor: pointer; list-style-position: inside; }
   gap: 4px 12px; align-items: start; padding: 12px 14px; border: 0; background: none;
   color: inherit; font: inherit; text-align: left; cursor: pointer; border-radius: 10px;
 }
-.row:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* One selection indicator: a focused row is always the current row (app.js keeps them in step),
+   so the current-row bar shows focus and the browser's ring would only double it. */
+.row:focus-visible { outline: none; }
 .dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 6px; background: var(--u1); }
 .dot.u5 { background: var(--u5); } .dot.u4 { background: var(--u4); }
 .dot.u3 { background: var(--u3); } .dot.u2 { background: var(--u2); }
@@ -78,11 +88,13 @@ section > details > summary { cursor: pointer; list-style-position: inside; }
 .msg-head .from { color: var(--text); font-weight: 600; }
 .msg.mine .msg-head .from::after { content: " (you)"; font-weight: 400; color: var(--muted); }
 .body { white-space: pre-wrap; margin: 0; font: inherit; }
-.reply { border-top: 1px solid var(--line); padding-top: 12px; }
+.reply { background: var(--field); border: 1px solid var(--line); border-radius: 10px;
+  padding: 12px 14px; margin-top: 14px; }
+.panelhead { margin: 0 0 6px; font-size: .95em; font-weight: 650; }
 .reply label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
 .reply textarea {
   width: 100%; min-height: 120px; resize: vertical; padding: 10px; border-radius: 8px;
-  border: 1px solid var(--line); background: var(--field); color: var(--text); font: inherit;
+  border: 1px solid var(--line); background: var(--card); color: var(--text); font: inherit;
 }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; align-items: center; }
 .btn {
@@ -128,7 +140,7 @@ section > details > summary { cursor: pointer; list-style-position: inside; }
 .linkbtn:hover { text-decoration: underline; }
 details > .linkbtn { display: block; margin: 0 0 6px auto; }
 
-.why { margin: 10px 0 0; font-size: .85em; color: var(--muted); }
+.why { margin: 14px 0 0; font-size: .85em; color: var(--muted); }
 .why summary { cursor: pointer; }
 .why dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 14px; margin: 8px 0 0; }
 .why dt { color: var(--muted); }
@@ -136,10 +148,11 @@ details > .linkbtn { display: block; margin: 0 0 6px auto; }
 
 .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 10;
   display: flex; gap: 14px; align-items: center; max-width: calc(100% - 32px);
+  width: max-content;   /* left: 50% alone would cap it at half the screen on a phone */
   background: #202124; color: #fff; padding: 10px 16px; border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0,0,0,.25); font-size: .9em; }
 .toast[hidden] { display: none; }
-.toast .linkbtn { color: #8fb0ff; font-weight: 600; }
+.toast .linkbtn { color: #8fb0ff; font-weight: 600; white-space: nowrap; flex: none; }
 .btn[disabled] { opacity: .6; cursor: progress; }
 
 .hint { margin: 4px 0 0; font-size: .85em; color: #b45309; min-height: 1em; }
@@ -148,12 +161,12 @@ details > .linkbtn { display: block; margin: 0 0 6px auto; }
   background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--text); }
 .demo-banner a { color: var(--accent); }
 
-li.card.current { box-shadow: inset 3px 0 0 var(--accent); }
+li.card.current { box-shadow: inset 4px 0 0 var(--accent); }
 .help { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center;
-  background: rgba(0,0,0,.35); padding: 16px; }
+  grid-template-columns: minmax(0, 1fr); background: rgba(0,0,0,.35); padding: 16px; }
 .help[hidden] { display: none; }
 .helpbox { background: var(--card); color: var(--text); border-radius: 10px; padding: 18px 22px;
-  max-width: 420px; width: 100%; box-shadow: 0 10px 40px rgba(0,0,0,.3); }
+  max-width: 420px; width: 100%; min-width: 0; box-shadow: 0 10px 40px rgba(0,0,0,.3); }
 .helpbox h2 { margin: 0 0 10px; font-size: 1rem; }
 .helpbox dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; }
 .helpbox dt { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .9em; }
@@ -175,3 +188,186 @@ li.card.current { box-shadow: inset 3px 0 0 var(--accent); }
 .sendmeta dd { margin: 0; overflow-wrap: anywhere; }
 .sendbody { white-space: pre-wrap; font: inherit; background: var(--bg); border: 1px solid var(--line);
   border-radius: 6px; padding: 10px; max-height: 40vh; overflow: auto; margin: 0 0 8px; }
+
+li.card.leaving { opacity: .45; transition: opacity .15s; }
+
+li.card.unread .sender, li.card.unread .subject { font-weight: 700; }
+li.card:not(.unread) .sender { font-weight: 500; }
+
+.ask { background: var(--field); border: 1px solid var(--line); border-radius: 10px;
+  padding: 12px 14px; margin: 14px 0 4px; }
+.ask > summary { cursor: pointer; color: var(--accent); font-weight: 600; font-size: .92em; }
+.askbody { margin: 8px 0 0 14px; }
+@media (max-width: 560px) { .askbody { margin-left: 0; } }
+.askprev { margin: 4px 0 8px; }
+.askprev > summary { cursor: pointer; font-size: .85em; color: var(--muted); margin-bottom: 6px; }
+.askprev .answer { opacity: .92; }
+.askprev .sendbody { max-height: 24vh; overflow-y: auto; }
+.askturn + .askturn { border-top: 1px solid var(--line); padding-top: 4px; }
+/* Same field style as the Reply box: card fill on the tinted panel. */
+.askbody textarea { width: 100%; box-sizing: border-box; font: inherit; padding: 10px;
+  border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--text); }
+.askq { font-weight: 600; margin: 10px 0 4px; }
+.answer { border-left: 3px solid var(--accent); padding: 2px 0 2px 12px; margin: 0 0 12px; }
+.answertext { white-space: pre-wrap; margin: 0 0 8px; }
+.notewho { margin: 8px 0 2px; font-size: .88em; font-weight: 600; }
+
+.modelpick { font: inherit; font-size: .9em; padding: 4px 6px; border-radius: 6px;
+  border: 1px solid var(--line); background: var(--card); color: var(--text); }
+
+/* Memory authorship and "What's going on" */
+.authorlabel { margin: 2px 0 4px; font-size: .82em; }
+.askq + .authorlabel { margin-top: -2px; }
+.situation { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 8px; }
+.situation h3 { font-size: 1em; margin: 4px 0; }
+.situationitem { background: var(--field); border: 1px solid var(--line); border-radius: 8px;
+  padding: 6px 10px; margin: 8px 0; }
+.situationtext { margin: 2px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Text boxes size to their content (app.js fitText is the fallback); long ones scroll. */
+textarea { field-sizing: content; min-height: 2.6em; max-height: 70vh; overflow-y: auto; }
+
+/* Memory page: wider than the other dialogs, scrolls inside the overlay, fits a phone. */
+.helpbox.memorybox { max-width: 720px; max-height: calc(100vh - 32px); overflow-y: auto; }
+.memhead { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.memhead h2 { margin: 0; }
+.memsection { margin-top: 12px; }
+.memsection h3 { font-size: 1em; margin: 4px 0; }
+.personname { margin: 2px 0; font-weight: 600; }
+.personaddrs { margin: 0 0 2px; overflow-wrap: anywhere; }
+.unconfirmed { margin: 0 0 2px; font-style: italic; opacity: .85; }
+.nameinput { width: 100%; font: inherit; padding: 6px 8px; margin: 2px 0 6px; border-radius: 6px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+.memorybox .actions select { max-width: 100%; }
+@media (max-width: 560px) {
+  .helpbox.memorybox { padding: 14px 14px; max-height: calc(100vh - 16px); }
+  .help { padding: 8px; }
+}
+
+/* Star and swipe. The card is a grid so the star sits beside the row button (a button can't hold
+   one) and the swipe's reveal sits under both. */
+.card { display: grid; grid-template-columns: minmax(0, 1fr) auto; position: relative; }
+.card > .row { grid-row: 1; grid-column: 1; }
+.card > .star { grid-row: 1; grid-column: 2; align-self: stretch; }
+.card > .detail { grid-row: 2; grid-column: 1 / -1; }
+.card > .row { touch-action: pan-y; }   /* vertical scroll stays the browser's; we read sideways */
+.star { font: inherit; font-size: 18px; line-height: 1; width: 40px; padding: 0; border: 0;
+  border-radius: 0 10px 10px 0; background: none; color: var(--u1); cursor: pointer; }
+.star.on, .btn-star.on { color: var(--u3); }
+.star:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
+.star.pending, .btn-star.pending { opacity: .55; cursor: progress; }
+.btn.btn-star.on { color: var(--text); }
+.btn.btn-star.on::first-letter { color: var(--u3); }
+.tag { display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: 4px; font-size: .9em;
+  background: var(--field); border: 1px solid var(--line); }
+.counts .starview { font-size: inherit; }
+.swipe-reveal { display: none; grid-row: 1; grid-column: 1 / -1; align-items: center;
+  justify-content: flex-end; padding: 0 18px; border-radius: 10px; font-weight: 600;
+  background: color-mix(in srgb, var(--accent) 22%, var(--card)); color: var(--text); }
+.card.swiping { overflow: hidden; }
+.card.swiping .swipe-reveal { display: flex; }
+.card.armed .swipe-reveal { background: var(--accent); color: var(--card); }
+.card.swiping > .row, .card.swiping > .star { position: relative; z-index: 1; background: var(--card);
+  transform: translateX(var(--swipe, 0px)); }
+.card.swiping > .row { border-radius: 10px 0 0 10px; }
+.card.leaving > .row, .card.leaving > .star { transition: transform .18s ease-out; }
+@media (max-width: 560px) {
+  /* Thumb-sized targets on a phone. */
+  .btn { min-height: 44px; padding: 10px 14px; }
+  .btn.small { min-height: 40px; padding: 8px 12px; }
+  .modelpick { min-height: 40px; }
+  .star { width: 44px; min-height: 44px; }
+  .linkbtn { min-height: 32px; }
+  .btn { padding: 10px 12px; }
+  .syncbar .btn { white-space: nowrap; }
+  .syncbar .kbdhint { display: none; }   /* no keyboard on a phone */
+  .top .search { height: 44px; font-size: 16px; }   /* 16px: iOS zooms into smaller inputs */
+}
+
+/* Move to: the section drop-down in the reply actions. */
+.moveto { display: inline-flex; align-items: center; gap: 6px; }
+
+/* The reply action row. Two groups: reply (Save, Send, Copy) and thread (Move to, Star,
+   Archive or Done, then the Open in Gmail/Slack link), the thread group pushed right. Every
+   control is one height. Blue marks the one recommended next action (Save as Gmail draft); the
+   rest share one neutral look, and a disabled control is neutral too, so a disabled Save never
+   reads as pale blue. Scoped to .replyactions, so the syncbar and dialogs keep their own look. */
+.replyactions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.replygroup, .threadgroup { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.threadgroup { margin-left: auto; }
+/* .reply label sets a bottom margin for the textarea label; the Move to label must not inherit it. */
+.replyactions .moveto { margin: 0; }
+/* Secondary controls sit on --card so they read as raised from the --field reply panel;
+   disabled ones drop back to the panel grey with muted text. */
+.replyactions .btn, .replyactions .movepick {
+  height: 36px; padding: 0 14px; font: inherit; font-size: 14px; line-height: 34px;
+  border: 1px solid var(--line); border-radius: 8px; white-space: nowrap;
+  display: inline-flex; align-items: center; justify-content: center;
+  background-color: var(--card); color: var(--text); cursor: pointer;
+}
+.replyactions .btn:hover:not([disabled]), .replyactions .movepick:hover:not([disabled]) {
+  background-color: color-mix(in srgb, var(--text) 6%, var(--card)); }
+.replyactions .btn:active:not([disabled]), .replyactions .movepick:active:not([disabled]) {
+  background-color: color-mix(in srgb, var(--text) 10%, var(--card)); }
+.replyactions .btn.primary { background-color: var(--accent); border-color: var(--accent);
+  color: var(--card); }
+.replyactions .btn.primary:hover:not([disabled]) {
+  background-color: color-mix(in srgb, var(--text) 12%, var(--accent)); }
+.replyactions .btn.primary:active:not([disabled]) {
+  background-color: color-mix(in srgb, var(--text) 20%, var(--accent)); }
+.replyactions .btn[disabled]:not(.pending), .replyactions .movepick[disabled] {
+  background-color: var(--field); border-color: var(--line); color: var(--muted); opacity: 1;
+  cursor: not-allowed; }
+/* The star's glyph is its own colour (amber when starred); the button stays neutral. A flex
+   container has no ::first-letter, so the star button lays its text out as a block. */
+.replyactions .btn.btn-star { display: inline-block; }
+/* Our own chevron, in --muted, so the select matches the buttons. Drawn with two gradients, not
+   an SVG data URI: the page's CSP (img-src 'self') blocks data: images. Being var(--muted), it
+   follows dark mode by itself; background-color stays separate so the theme fill applies. */
+.replyactions .movepick {
+  -webkit-appearance: none; appearance: none; display: inline-block; padding-right: 30px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%, var(--muted) calc(50% + 1.5px), transparent calc(50% + 1.5px)),
+                    linear-gradient(135deg, transparent 50%, var(--muted) 50%, var(--muted) calc(50% + 1.5px), transparent calc(50% + 1.5px));
+  background-size: 6px 6px, 6px 6px; background-repeat: no-repeat;
+  background-position: right 18px top 50%, right 12px top 50%;
+}
+.movepick:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Open in Gmail / Slack leaves FrontDesk, so it is a link, not a button. */
+.replyactions .openlink { display: inline-flex; align-items: center; height: 36px; padding: 0 2px;
+  font-size: 14px; color: var(--accent); border: 0; background: none; white-space: nowrap;
+  text-decoration: none; }
+.replyactions .openlink:hover { text-decoration: underline; }
+.replyactions .openlink:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px;
+  border-radius: 4px; }
+@media (max-width: 560px) {
+  .threadgroup { margin-left: 0; }
+  .replyactions .btn, .replyactions .movepick { height: 44px; min-height: 44px; line-height: 42px;
+    padding: 0 12px; }
+  .replyactions .movepick { padding-right: 30px; }
+  .replyactions .openlink { height: 44px; min-height: 44px; }
+}
+
+/* People strip: one chip per person in the thread, between the subject and the summary; a chip
+   opens that person's note right under the strip. */
+.peoplestrip { margin: 2px 0 8px; }
+.peoplechips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.tag.personchip { margin: 0; padding: 3px 10px; font: inherit; font-size: .85em; color: var(--text);
+  cursor: pointer; border-radius: 999px; }
+.tag.personchip.hasnote { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.tag.personchip[aria-expanded="true"] { background: var(--accent); border-color: var(--accent);
+  color: var(--card); }
+.tag.personchip.more { color: var(--muted); }
+.tag.personchip:disabled { cursor: default; opacity: .75; }
+.tag.personchip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.peoplelink { color: var(--muted); }
+.personeditor { background: var(--field); border: 1px solid var(--line); border-radius: 8px;
+  padding: 4px 12px 10px; margin-top: 8px; }
+.personeditor textarea { width: 100%; box-sizing: border-box; font: inherit; padding: 8px 10px;
+  border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--text); }
+@media (max-width: 560px) {
+  .tag.personchip { min-height: 44px; padding: 8px 12px; }
+  .peoplelink { min-height: 44px; }
+}
+
+/* The People strip's own label, so the chips read as a section. */
+.peoplelabel { font-size: .8em; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin-right: 4px; align-self: center; }

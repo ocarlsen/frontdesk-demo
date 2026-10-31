@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-static="1" data-exported="2026-10-28T21:53:04Z">
+<html lang="en" data-static="1" data-exported="2026-10-31T02:22:33Z">
 <head>
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
@@ -17,9 +17,12 @@
   <div class="syncbar">
     <span id="syncnote" class="syncnote" role="status"></span>
     <span class="kbdhint">Press ? for shortcuts</span>
+    <button id="memory" class="btn" type="button">Memory</button>
     <button id="profile" class="btn" type="button">Profile</button>
     <button id="sync" class="btn" type="button">Sync</button>
   </div>
+  <input id="search" class="search" type="search" placeholder="Search (/): type to filter, Enter searches all of Gmail"
+         aria-label="Search" autocomplete="off" spellcheck="false" maxlength="500">
 </header>
 <div id="toast" class="toast" role="status" hidden></div>
 <div id="help" class="help" role="dialog" aria-label="Keyboard shortcuts" hidden></div>
