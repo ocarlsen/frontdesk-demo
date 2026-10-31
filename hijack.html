@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Try to Hijack It</title>
+<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="hijack.css">
+<script src="hijack.js" defer></script>
+</head>
+<body class="hijack">
+<header class="top">
+  <h1>Try to hijack it</h1>
+  <p class="hj-lede">Thirty-two emails written to take over an AI inbox assistant: hidden
+  instructions, fake system messages, forged replies, words planted for your reply. Pick one to
+  see the email as the attacker wrote it, what it wanted, and what FrontDesk actually did. Every
+  result is a recording of a real model run on this exact email.</p>
+  <div class="hj-models" id="models" role="group" aria-label="Model"></div>
+  <p class="hj-note">Each model was recorded once, in a run separate from the results table on the
+  About page, with the same prompt. Single runs can differ by an attack, so a model can resist
+  all 32 in one run and 31 in another.</p>
+  <p class="hj-nav"><a href="index.html">&larr; Back to the demo inbox</a></p>
+</header>
+<main id="main" class="hj-main">
+  <nav class="hj-list" id="list" aria-label="Attacks"></nav>
+  <label class="hj-pick" for="pick">Attack</label>
+  <select class="hj-pick" id="pick"></select>
+  <article class="hj-case" id="case" aria-live="polite">
+    <p class="status">Loading</p>
+  </article>
+</main>
+<footer class="hj-foot">
+  <p>These are the 32 attacks FrontDesk is tested against, from
+  <a href="https://github.com/ocarlsen/frontdesk/tree/main/evals/injection">its evaluation suite</a>.
+  Prompt injection is not solved: a model can still be fooled by an attack nobody has written yet.
+  FrontDesk's other layers (mail quoted as data, actions that need a second permission, and Send
+  that always shows you the exact message and recipients) are there for that case.</p>
+</footer>
+</body>
+</html>

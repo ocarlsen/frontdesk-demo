@@ -19,6 +19,7 @@ const EXPORTED = Date.parse(document.documentElement.dataset.exported || "");
 const staticHidden = new Map();   // item id -> "archived" | "done"
 const staticLabels = new Map();   // item id -> bucket the visitor moved it to
 const staticStars = new Map();    // item id -> starred, as the visitor left it
+const staticUnread = new Map();   // item id -> unread, as the visitor left it
 
 function staticFile(itemId) {
   return itemId.replace(/[^A-Za-z0-9]/g, "-");
@@ -178,6 +179,15 @@ function buildDetail(item, triage) {
   label.htmlFor = id;
   const ta = el("textarea");
   ta.id = id;
+  if (item.source !== "slack") {
+    // Reply all (a): the reply also goes to everyone else on the thread, as Cc.
+    const all = el("label", "replyall");
+    const box = el("input");
+    box.type = "checkbox";
+    box.className = "replyall-box";
+    all.append(box, el("span", null, "Reply all (a)"));
+    ta.replyAll = box;
+  }
   ta.value = proposed;
   ta.placeholder = "Write a reply";
   const hint = el("p", "hint");
@@ -215,7 +225,10 @@ function buildDetail(item, triage) {
     setTimeout(() => { copy.textContent = "Copy"; }, 1800);
   });
   const draftNote = el("p", "hint draftnote");
-  reply.append(head, label, ta, hint, draftNote);
+  const headRow = el("div", "replyhead");
+  headRow.append(head);
+  if (ta.replyAll) headRow.append(ta.replyAll.parentNode || ta.replyAll);
+  reply.append(headRow, label, ta, hint, draftNote);
   // Save draft, Send and Archive act through Gmail; a Slack thread gets Copy and Open in Slack.
   const isGmail = item.source !== "slack";
   if (isGmail && !STATIC) loadGmailDraft(item, { ta, label, save, proposed, draftNote, edited });
@@ -237,9 +250,13 @@ function buildDetail(item, triage) {
     moveTo.append(pick);
     threadGroup.append(moveTo);
   }
-  threadGroup.append(starButton(item, "btn"));
+  const detailRead = iconButton("btn btn-icon btn-read", isUnread(item) ? "i-read" : "i-unread",
+                                isUnread(item) ? "Mark read (Shift+I)" : "Mark unread (Shift+U)");
+  detailRead.addEventListener("click", () => setRead(item, isUnread(item), detailRead.closest("li.card")));
+  threadGroup.append(starButton(item, "btn"), detailRead);
   const arch = el("button", "btn btn-archive", "Archive");
   arch.type = "button";
+  arch.title = "Archive (e)";
   arch.addEventListener("click", () => archive(item, arch));
   if (item.hidden) {
     // Only the Starred view lists a hidden thread: offer to bring it back instead.
@@ -247,7 +264,15 @@ function buildDetail(item, triage) {
     back.type = "button";
     back.addEventListener("click", () => restore(item, back));
     threadGroup.append(back);
-  } else if (isGmail) threadGroup.append(arch);
+  } else if (isGmail) {
+    if (!inInbox(item)) {
+      const ib = el("button", "btn btn-inbox", "Move to inbox");
+      ib.type = "button";
+      ib.title = "Put it back in Gmail's inbox";
+      ib.addEventListener("click", () => moveToInbox(item, ib));
+      threadGroup.append(ib);
+    } else threadGroup.append(arch);
+  }
   else {
     const doneBtn = el("button", "btn btn-archive", "Done");
     doneBtn.type = "button";
@@ -318,7 +343,8 @@ function buildCard(item, triage) {
   let detail = null;
   row.addEventListener("focus", () => { if (currentId !== item.id) setCurrent(li); });
   row.addEventListener("click", () => {
-    if (li.dataset.swiped) { delete li.dataset.swiped; return; }   // the end of a swipe
+    if (li.dataset.swiped) { delete li.dataset.swiped; return; }   // the end of a swipe or long press
+    if (selected.size && TOUCH.matches) { toggleSelect(li, false); return; }   // selecting: a tap picks
     setCurrent(li);   // a clicked row is the current one, so j/k continue from it
     const open = row.getAttribute("aria-expanded") === "true";
     if (open) {
@@ -332,7 +358,28 @@ function buildCard(item, triage) {
     if (open) openThreads.delete(item.id); else openThreads.add(item.id);
     if (!open) markReadSoon(item, li, row);
   });
-  li.append(row, starButton(item, "star"));
+  // Hover tools, as in Gmail's list: read/unread and archive (done on Slack), each with its key.
+  const tools = el("span", "rowtools");
+  const readBtn = iconButton("rowtool btn-read", isUnread(item) ? "i-read" : "i-unread",
+                             isUnread(item) ? "Mark read (Shift+I)" : "Mark unread (Shift+U)");
+  readBtn.addEventListener("click", ev => { ev.stopPropagation(); setRead(item, isUnread(item), li); });
+  tools.append(readBtn);
+  if (!item.hidden) {
+    const arcBtn = iconButton("rowtool", "i-archive",
+                              item.source === "slack" ? "Done (e)" : "Archive (e)");
+    arcBtn.addEventListener("click", ev => { ev.stopPropagation(); setCurrent(li); dismissCard(li); });
+    tools.append(arcBtn);
+  }
+  // Select (x, or Shift-click for a range): Gmail's checkbox, in the dot's place.
+  const pick = el("input", "rowcheck");
+  pick.type = "checkbox";
+  pick.title = "Select (x)";
+  pick.setAttribute("aria-label", "Select " + (item.subject || "(no subject)"));
+  pick.checked = selected.has(item.id);
+  if (pick.checked) li.classList.add("selected");
+  pick.addEventListener("click", ev => { ev.stopPropagation(); toggleSelect(li, ev.shiftKey); });
+  li.append(row, pick, tools, starButton(item, "star"));
+  li.addEventListener("mouseenter", () => centerTools(li));
   if (!item.hidden) attachSwipe(li, row, item);
   if (openThreads.has(item.id)) {            // reopen after a re-render
     detail = buildDetail(item, triage);
@@ -360,7 +407,12 @@ async function postAction(kind, itemId, extra) {
       staticStars.set(itemId, kind === "star");
       return { status: "done", kind, starred: kind === "star", demo: true };
     }
-    if (kind === "read") return { status: "done" };
+    if (kind === "inbox") {
+      const it = (window.__items || []).find(r => r.item.id === itemId);
+      if (it && !(it.item.labels || []).includes("INBOX")) it.item.labels = [...(it.item.labels || []), "INBOX"];
+      return { status: "done", demo: true };
+    }
+    if (kind === "read" || kind === "unread") { staticUnread.set(itemId, kind === "unread"); return { status: "done" }; }
     if (kind === "relabel") staticLabels.set(itemId, extra.bucket);
     if (kind === "profile" || kind === "note" || kind.startsWith("note_") ||
         kind.startsWith("person_") || kind.startsWith("situation_")) throw new Error("demo mode");
@@ -414,7 +466,8 @@ async function startSend(item, ta, btn) {
   let prep;
   try {
     prep = await postAction("send_prepare", item.id,
-                            { body: ta.value, seen_updated_at: item.updated_at });
+                            { body: ta.value, seen_updated_at: item.updated_at,
+                              reply_all: !!(ta.replyAll && ta.replyAll.checked) });
   } catch (e) {
     btn.disabled = false;
     toast("Can't send: " + e.message);
@@ -529,7 +582,8 @@ async function saveDraft(item, ta, btn) {
   btn.textContent = "Saving...";
   try {
     const out = await postAction("draft", item.id,
-                                 { body: ta.value, seen_updated_at: item.updated_at });
+                                 { body: ta.value, seen_updated_at: item.updated_at,
+                                   reply_all: !!(ta.replyAll && ta.replyAll.checked) });
     if (out.demo) {
       toast(out.note);
     } else {
@@ -568,10 +622,107 @@ async function relabel(item, bucket, name, ctl, from) {
 }
 
 // Opening a thread for ~2 seconds marks it read (Gmail, Slack DMs); skimming with j/k does not.
+// An icon button from the inline SVG symbols in index.html (the CSP allows no icon fonts or
+// data: images). The label is the button's accessible name and its tooltip, with the key.
+function iconButton(cls, symbol, label) {
+  const b = el("button", cls);
+  b.type = "button";
+  b.setAttribute("aria-label", label);
+  b.title = label;
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS ? document.createElementNS(NS, "svg") : el("svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  const use = document.createElementNS ? document.createElementNS(NS, "use") : el("use");
+  use.setAttribute("href", "#" + symbol);
+  svg.append(use);
+  b.append(svg);
+  return b;
+}
+
+function isUnread(item) { return (item.labels || []).includes("UNREAD"); }
+// A Gmail thread outside the inbox (kept from a search, archived in Gmail): Move to inbox applies.
+function inInbox(item) { return item.source === "slack" || (item.labels || []).includes("INBOX"); }
+
+async function moveToInbox(item, btn) {
+  if (btn) btn.disabled = true;
+  toast("Moving to the inbox\u2026");
+  try {
+    await postAction("inbox", item.id);
+    await load();
+    toast("Moved to the inbox: " + (item.subject || "(no subject)"), "Undo", async () => {
+      try { await postAction("archive", item.id); await load(); toast("Archived again."); }
+      catch (e) { toast("Undo failed: " + e.message); }
+    });
+  } catch (e) {
+    if (btn) btn.disabled = false;
+    toast("Move to inbox failed: " + e.message);
+  }
+}
+
+// Slack matches only have Keep: say so when an action leaves nothing else to act on.
+function gmailOnly(items) {
+  const rest = items.filter(it => !it.slackMatch);
+  if (!rest.length && items.length) toast("Slack matches: Keep them first, then read, archive or star them.");
+  return rest;
+}
+
+function bulkInbox(from) {
+  const items = gmailOnly(from || selectedItems()).filter(it => !inInbox(it) && !it.hidden);
+  if (!items.length) { toast("Already in the inbox."); return; }
+  // A search result moved to the inbox is also kept, so it shows here too: sync only fetches
+  // the last week of the inbox, and a kept thread is fetched whatever its age. Keeping ranks it
+  // (one model call); Undo archives it, which also lets it go.
+  runBulk(items, async it => { await bulkAct(it, "inbox"); if (it.result) await postAction("keep", it.id); },
+          it => it.result ? postAction("archive", it.id) : bulkAct(it, "archive"),
+          n => "Moved to the inbox: " + plural(n, "thread", "threads") + ".", true, "Moving to the inbox");
+}
+
+function paintRead(item) {
+  // Every control for this thread follows its read state: the row's weight and its icons.
+  for (const li of document.querySelectorAll("li.card")) {
+    if (li.dataset.id !== item.id) continue;
+    li.classList.toggle("unread", isUnread(item));
+    for (const b of li.querySelectorAll(".btn-read")) {
+      const unread = isUnread(item);
+      const label = unread ? "Mark read (Shift+I)" : "Mark unread (Shift+U)";
+      b.setAttribute("aria-label", label);
+      b.title = label;
+      const use = b.querySelector("use");
+      if (use) use.setAttribute("href", unread ? "#i-read" : "#i-unread");
+    }
+  }
+}
+
+// Shift+I / Shift+U, the row icon and the thread's button. Marking unread also stops the
+// open-for-two-seconds rule from marking it read again while it stays open.
+async function setRead(item, read, li) {
+  if (read === !isUnread(item)) return;
+  if (li) { if (read) delete li.dataset.keepUnread; else li.dataset.keepUnread = "1"; }
+  const before = [...(item.labels || [])];
+  item.labels = read ? before.filter(l => l !== "UNREAD") : [...before, "UNREAD"];
+  paintRead(item);
+  if (item.source !== "slack") toast((read ? "Marking read" : "Marking unread") + " in Gmail\u2026");
+  try {
+    const out = await postAction(read ? "read" : "unread", item.id, read ? { explicit: true } : undefined);
+    if (out.here_only) {
+      toast("Marked read here. Slack keeps its own read state for threads.", "Undo",
+            () => setRead(item, false, li));
+      return;
+    }
+    toast(read ? "Marked read." : "Marked unread.", "Undo", () => setRead(item, !read, li));
+  } catch (e) {
+    item.labels = before;
+    paintRead(item);
+    toast((read ? "Mark read" : "Mark unread") + " failed: " + e.message);
+  }
+}
+
 function markReadSoon(item, li, row) {
   if (!(item.labels || []).includes("UNREAD")) return;
   setTimeout(async () => {
     if (row.getAttribute("aria-expanded") !== "true") return;
+    if (li.dataset.keepUnread) return;   // marked unread while open: leave it
     try {
       const out = await postAction("read", item.id);
       if (out.status === "done" || out.status === "already_read") {
@@ -603,6 +754,7 @@ async function markDone(item, btn) {
 
 async function archive(item, btn) {
   btn.disabled = true;
+  toast("Archiving\u2026");
   try {
     await postAction("archive", item.id);
     await load();
@@ -712,10 +864,18 @@ function attachSwipe(li, row, item) {
     if (e.pointerType !== "touch") return;   // a mouse or pen never swipes
     s = { x: e.clientX, y: e.clientY, lock: null, act: false, id: e.pointerId,
           w: row.getBoundingClientRect ? row.getBoundingClientRect().width : 0 };
+    // A long press (half a second without moving) selects the row, as in Gmail's app.
+    const held = s;
+    held.timer = setTimeout(() => {
+      if (s !== held || held.lock) return;
+      li.dataset.swiped = "1";               // the tap that ends this press must not open it
+      toggleSelect(li, false);
+    }, LONG_PRESS_MS);
   });
   row.addEventListener("pointermove", e => {
     if (!s || e.pointerId !== s.id) return;
     const d = swipeDecide(e.clientX - s.x, e.clientY - s.y, s.lock, s.w);
+    if (d.lock) clearTimeout(s.timer);
     if (d.lock === "y") { s = null; reset(); return; }
     if (d.lock !== "x") return;
     if (!s.lock && row.setPointerCapture) row.setPointerCapture(e.pointerId);
@@ -750,6 +910,271 @@ function attachSwipe(li, row, item) {
 // Archive (Gmail) or Done (Slack) one card, from the e key or a swipe. Fades the row while the
 // server works; moves the highlight only once it is gone, to the thread below it (or above, at
 // the end). Resolves true when the card left the list.
+let gPending = false;
+let starChord = false;
+
+// ---- Bulk selection. The set holds item ids, so a re-render keeps it; the bar outside <main>
+// acts on all of it, and the keys that act on one thread act on the selection while there is one.
+const selected = new Set();
+let lastPicked = null;
+const LONG_PRESS_MS = 500;
+const TOUCH = typeof matchMedia === "function" ? matchMedia("(hover: none)") : { matches: false };
+
+function itemRow(id) { return (window.__items || []).find(r => r.item.id === id) || null; }
+// A search result on screen (not stored, not ranked), by id: a Gmail thread or a Slack match.
+function searchResult(id) {
+  const g = gmailSearch && gmailSearch.q === query ? gmailSearch : null;
+  if (!g) return null;
+  return (g.results || []).find(r => r.id === id) ||
+         (Array.isArray(g.slack) ? g.slack.find(r => r.id === id) : null) || null;
+}
+// A result as the bulk actions see a thread: its labels, and result: true so its actions go
+// straight to Gmail by thread id instead of through the store.
+function resultItem(r) {
+  if (r.id.startsWith("slack:")) {
+    // Keep is the only action: Slack's read state and Done apply once FrontDesk stores it.
+    return { id: r.id, source: "slack", subject: r.where, labels: [], result: true, slackMatch: true };
+  }
+  const labels = [...(r.in_inbox ? ["INBOX"] : []), ...(r.unread ? ["UNREAD"] : [])];
+  return { id: r.id, source: "gmail", subject: r.subject, labels, starred: !!r.starred, result: true };
+}
+function selectable(li) {
+  if (!li) return false;
+  return li.classList.contains("result") ? !!searchResult(li.dataset.id) : !!cardItems.get(li);
+}
+
+function paintSelection() {
+  for (const li of allCards()) {
+    const on = selected.has(li.dataset.id);
+    li.classList.toggle("selected", on);
+    const box = li.querySelector(":scope > .rowcheck");
+    if (box) box.checked = on;
+  }
+  if (document.body && document.body.classList) document.body.classList.toggle("selecting", selected.size > 0);
+  renderSelBar();
+}
+
+function toggleSelect(li, range) {
+  if (!selectable(li)) return;
+  const id = li.dataset.id;
+  if (range && lastPicked && lastPicked !== id) {
+    const cards = visibleCards().filter(selectable);
+    const a = cards.findIndex(c => c.dataset.id === lastPicked);
+    const b = cards.indexOf(li);
+    if (a >= 0 && b >= 0) {
+      for (const c of cards.slice(Math.min(a, b), Math.max(a, b) + 1)) selected.add(c.dataset.id);
+    } else selected.add(id);
+  } else if (selected.has(id)) selected.delete(id);
+  else selected.add(id);
+  lastPicked = id;
+  paintSelection();
+}
+
+function selectWhere(pred) {
+  selected.clear();
+  for (const li of visibleCards()) {
+    if (!selectable(li)) continue;
+    const it = cardItems.get(li) || resultItem(searchResult(li.dataset.id));
+    if (pred(it)) selected.add(li.dataset.id);
+  }
+  paintSelection();
+}
+
+function clearSelection() {
+  if (!selected.size) return false;
+  selected.clear();
+  paintSelection();
+  return true;
+}
+
+function selectedItems() {
+  return [...selected].map(id => {
+    const row = itemRow(id);
+    if (row) return row.item;
+    const r = searchResult(id);
+    return r ? resultItem(r) : null;
+  }).filter(Boolean);
+}
+
+// The labels each action changes on a result, mirrored onto the row so it re-renders right.
+const RESULT_FLAGS = { inbox: ["in_inbox", true], archive: ["in_inbox", false],
+                       read: ["unread", false], unread: ["unread", true],
+                       star: ["starred", true], unstar: ["starred", false] };
+
+// One action on a thread from the bulk bar: a stored thread through its usual action, a search
+// result as one label change in Gmail (kind "result"), with nothing stored.
+async function bulkAct(it, kind, extra) {
+  if (!it.result) return postAction(kind, it.id, extra);
+  const op = kind === "unarchive" ? "inbox" : kind;
+  const out = await postAction("result", it.id, { op });
+  const r = searchResult(it.id);
+  const [field, value] = RESULT_FLAGS[op];
+  if (r) r[field] = value;
+  return out;
+}
+
+// One request per thread through the same actions a single thread uses (same checks, same Gmail
+// and Slack calls), then one reload and one toast, whose Undo reverses only what succeeded.
+// keep: the threads stay in view (read, unread, star), so the selection stays, as in Gmail;
+// archive and move take them out of view and clear it.
+async function runBulk(items, doOne, undoOne, said, keep = false, doing = "Working") {
+  const bar = document.getElementById("selbar");
+  if (bar) bar.setAttribute("aria-busy", "true");
+  const done = [];
+  for (const [i, it] of items.entries()) {
+    // Each thread is a Gmail or Slack call; say so, so a batch never looks stuck.
+    toast(doing + " " + (i + 1) + " of " + items.length + "\u2026");
+    try { await doOne(it); done.push(it); } catch (e) { /* counted below */ }
+  }
+  if (!keep && !(items.length === 1 && items[0].result && !selected.has(items[0].id))) clearSelection();
+  if (bar) bar.removeAttribute("aria-busy");
+  await load();
+  const failed = items.length - done.length;
+  const text = said(done.length) + (failed ? " " + failed + " failed." : "");
+  if (!undoOne || !done.length) { toast(text); return; }
+  toast(text, "Undo", async () => {
+    let failed = 0;
+    for (const [i, it] of done.entries()) {
+      toast("Undoing " + (i + 1) + " of " + done.length + "\u2026");   // same reason as above
+      try { await undoOne(it); } catch (e) { failed += 1; }
+    }
+    await load();
+    toast(failed ? "Undone, but " + failed + " failed." : "Undone.");
+  });
+}
+
+const plural = (n, one, many) => n + " " + (n === 1 ? one : many);
+
+function bulkArchive(from) {
+  const all = gmailOnly(from || selectedItems());
+  const items = all.filter(it => !it.hidden && !(it.result && !inInbox(it)));
+  if (!items.length) { if (all.length) toast("Already archived."); return; }
+  runBulk(items, it => bulkAct(it, it.source === "slack" ? "done" : "archive"),
+          it => bulkAct(it, it.source === "slack" ? "undone" : "unarchive"),
+          n => (items.some(it => it.source === "slack") ? "Archived or marked done: " : "Archived: ") +
+               plural(n, "thread", "threads") + ".", false, "Archiving");
+}
+
+function bulkRead(read, from) {
+  const all = gmailOnly(from || selectedItems());
+  const items = all.filter(it => isUnread(it) === read);
+  if (!items.length) { if (all.length) toast("Already " + (read ? "read." : "unread.")); return; }
+  runBulk(items, it => bulkAct(it, read ? "read" : "unread", read ? { explicit: true } : undefined),
+          it => bulkAct(it, read ? "unread" : "read", read ? undefined : { explicit: true }),
+          n => "Marked " + (read ? "read: " : "unread: ") + plural(n, "thread", "threads") + ".", true,
+          read ? "Marking read" : "Marking unread");
+}
+
+function bulkStar() {
+  const items = gmailOnly(selectedItems());
+  if (!items.length) return;
+  const want = items.some(it => !it.starred);
+  const change = items.filter(it => !!it.starred !== want);
+  runBulk(change, it => bulkAct(it, want ? "star" : "unstar"),
+          it => bulkAct(it, want ? "unstar" : "star"),
+          n => (want ? "Starred: " : "Unstarred: ") + plural(n, "thread", "threads") + ".", true,
+          want ? "Starring" : "Unstarring");
+}
+
+// Keep Slack matches: each is fetched from Slack, stored, ranked once (one model call) and kept
+// current by sync until it is marked done; Undo marks it done.
+function bulkKeep(from) {
+  const items = (from || selectedItems()).filter(it => it.slackMatch);
+  if (!items.length) return;
+  runBulk(items, it => postAction("keep", it.id), it => postAction("done", it.id),
+          n => "Kept: " + plural(n, "conversation", "conversations") + ". They're in FrontDesk now.",
+          false, "Keeping");
+}
+
+function bulkMove(bucket) {
+  const rows = [...selected].map(itemRow).filter(r => r && r.triage && r.triage.bucket !== bucket);
+  if (!rows.length) { clearSelection(); return; }
+  const from = new Map(rows.map(r => [r.item.id, r.triage.bucket]));
+  runBulk(rows.map(r => r.item), it => postAction("relabel", it.id, { bucket }),
+          it => postAction("relabel", it.id, { bucket: from.get(it.id) }),
+          n => "Moved to " + bucketName(bucket) + ": " + plural(n, "thread", "threads") + ".", false,
+          "Moving");
+}
+
+function renderSelBar() {
+  const bar = document.getElementById("selbar");
+  if (!bar || !bar.replaceChildren) return;
+  bar.hidden = selected.size === 0;
+  if (bar.hidden) { bar.replaceChildren(); return; }
+  const cards = visibleCards().filter(selectable);
+  const all = el("input", "selall");
+  all.type = "checkbox";
+  all.checked = cards.length > 0 && cards.every(c => selected.has(c.dataset.id));
+  all.setAttribute("aria-label", all.checked ? "Select none (* then n)" : "Select all (* then a)");
+  all.title = all.getAttribute("aria-label");
+  all.addEventListener("click", () => { if (all.checked) selectWhere(() => true); else clearSelection(); });
+  const which = el("select", "selwhich");
+  which.setAttribute("aria-label", "Select");
+  for (const [v, t] of [["", "Select\u2026"], ["a", "All (* a)"], ["n", "None (* n)"],
+                        ["r", "Read (* r)"], ["u", "Unread (* u)"]]) {
+    which.append(Object.assign(el("option", null, t), { value: v }));
+  }
+  which.addEventListener("change", () => { starPick(which.value); which.value = ""; });
+  const count = el("span", "selcount");
+  count.append(el("b", null, String(selected.size)), el("span", "selword", " selected"));
+  count.setAttribute("aria-live", "polite");
+  // Each button carries an icon and a label; a phone shows only the icons (the label stays as the
+  // accessible name), so the bar fits one line at the bottom of the screen.
+  const btn = (text, title, fn, symbol) => {
+    const b = symbol ? iconButton("btn selbtn", symbol, title) : el("button", "btn selbtn");
+    b.type = "button";
+    b.title = title;
+    b.setAttribute("aria-label", title.replace(/ \(.*\)$/, ""));   // "Mark read", without the key
+    b.append(el("span", "sellabel", text));
+    b.addEventListener("click", fn);
+    return b;
+  };
+  const move = el("select", "movepick selmove");
+  move.setAttribute("aria-label", "Move to (v)");
+  move.title = "Move to (v)";
+  move.append(Object.assign(el("option", null, "Move to\u2026"), { value: "" }));
+  for (const [b, name] of BUCKET_NAMES) move.append(Object.assign(el("option", null, name), { value: b }));
+  move.addEventListener("change", () => { if (move.value) bulkMove(move.value); });
+  const items = selectedItems();
+  const stored = items.some(it => !it.result);
+  const others = items.some(it => !it.slackMatch);
+  bar.replaceChildren(all, which, count,
+    ...(others ? [
+      btn("Read", "Mark read (Shift+I)", () => bulkRead(true), "i-read"),
+      btn("Unread", "Mark unread (Shift+U)", () => bulkRead(false), "i-unread"),
+      btn("Archive", "Archive, or Done for Slack (e)", () => bulkArchive(), "i-archive")] : []),
+    ...(items.some(it => !it.slackMatch && !inInbox(it) && !it.hidden)
+      ? [btn("Inbox", "Move to inbox", () => bulkInbox(), "i-inbox")] : []),
+    ...(others ? [btn("Star", "Star or unstar (s)", bulkStar, "i-star")] : []),
+    ...(items.some(it => it.slackMatch)
+      ? [btn("Keep", "Keep in FrontDesk (ranked, one model call each)", () => bulkKeep(), "i-keep")] : []),
+    ...(stored ? [move] : []),
+    btn("Clear", "Clear the selection (Esc)", clearSelection, "i-clear"));
+  bar.lastChild.classList.add("selclear");
+}
+
+function starPick(k) {
+  if (k === "a") selectWhere(() => true);
+  else if (k === "n") clearSelection();
+  else if (k === "r") selectWhere(it => !isUnread(it));
+  else if (k === "u") selectWhere(it => isUnread(it));
+}
+
+// [ and ]: archive (or mark done) the current thread, then open its neighbour above or below,
+// as Gmail does from an open conversation.
+async function archiveAndStep(li, step) {
+  const cards = visibleCards();
+  const i = cards.indexOf(li);
+  const target = cards[i + step];
+  const wasOpen = isOpen(li);
+  const gone = await dismissCard(li);
+  if (!gone || !target) return;
+  const again = visibleCards().find(c => c.dataset.id === target.dataset.id);
+  if (!again) return;
+  setCurrent(again);
+  if (wasOpen && !isOpen(again)) again.querySelector(":scope > .row").click();
+}
+
 function dismissCard(li) {
   const it = cardItems.get(li);
   if (!it || it.hidden) return Promise.resolve(false);
@@ -1263,7 +1688,7 @@ function render(rows) {
 
   const groups = Object.fromEntries(SECTIONS.map(s => [s.key, []]));
   for (const r of rows) {
-    const key = r.item.kept ? "kept"
+    const key = r.item.kept && !inInbox(r.item) ? "kept"
       : r.triage && groups[r.triage.bucket] ? r.triage.bucket : "untriaged";
     groups[key].push(r);
   }
@@ -1347,7 +1772,31 @@ function buildResultCard(r) {
     row.setAttribute("aria-expanded", String(!open));
     li.classList.toggle("open", !open);
   });
-  li.append(row);
+  // Select (x, or Shift-click for a range), as on a stored thread; the bar then acts in Gmail.
+  const pick = el("input", "rowcheck");
+  pick.type = "checkbox";
+  pick.title = "Select (x)";
+  pick.setAttribute("aria-label", "Select " + (r.subject || "(no subject)"));
+  pick.checked = selected.has(r.id);
+  if (pick.checked) li.classList.add("selected");
+  pick.addEventListener("click", ev => { ev.stopPropagation(); toggleSelect(li, ev.shiftKey); });
+  // Hover tools under the age, as on a FrontDesk row, each for this thread's own state: read or
+  // unread, and Archive or (when archived) Move to inbox, which also keeps it. They act through
+  // the bar's actions, so the icons change only once Gmail has, and the toast offers Undo.
+  const tools = el("span", "rowtools");
+  const it = resultItem(r);
+  const readBtn = iconButton("rowtool btn-read", r.unread ? "i-read" : "i-unread",
+                             r.unread ? "Mark read" : "Mark unread");
+  readBtn.addEventListener("click", ev => { ev.stopPropagation(); bulkRead(!!r.unread, [it]); });
+  const boxBtn = r.in_inbox ? iconButton("rowtool btn-box", "i-archive", "Archive")
+                            : iconButton("rowtool btn-box", "i-inbox", "Move to inbox");
+  boxBtn.addEventListener("click", ev => {
+    ev.stopPropagation();
+    if (r.in_inbox) bulkArchive([it]); else bulkInbox([it]);
+  });
+  tools.append(readBtn, boxBtn);
+  li.append(row, pick, tools);
+  li.addEventListener("mouseenter", () => centerTools(li));
   return li;
 }
 
@@ -1406,11 +1855,62 @@ async function keepResult(r, btn) {
   }
 }
 
+// Search results in tabs, one source at a time, so every source and its count is visible
+// without scrolling: FrontDesk (instant, as you type), Gmail and Slack (after Enter, or a click
+// on their tab). j/k walk the open tab (hidden panes have no layout); h/l switch tabs.
+let searchTab = "frontdesk";
+
+// Until a search answers, the server's status says whether Slack is synced here: the threads
+// on screen can't, since every Slack thread may be marked done.
+let slackSynced = false;
+
+function slackConnected(g) {
+  if (g && !g.loading && !g.error) return g.slack !== null && g.slack !== undefined;
+  return STATIC || slackSynced || (window.__items || []).some(r => r.item.source === "slack");
+}
+
+function searchTabs(g) {
+  const tabs = ["frontdesk", "gmail"];
+  if (slackConnected(g)) tabs.push("slack");
+  return tabs;
+}
+
+function switchSearchTab(step) {
+  const g = gmailSearch && gmailSearch.q === query ? gmailSearch : null;
+  const tabs = searchTabs(g);
+  const i = Math.max(0, tabs.indexOf(searchTab));
+  pickSearchTab(tabs[(i + step + tabs.length) % tabs.length]);
+}
+
+function pickSearchTab(tab) {
+  searchTab = tab;
+  const g = gmailSearch && gmailSearch.q === query ? gmailSearch : null;
+  if (tab !== "frontdesk" && !g && !STATIC) { searchGmail(query); return; }   // runs both sources
+  render(window.__items || []);
+  const first = visibleCards()[0];
+  if (first) setCurrent(first);
+}
+
 function renderSearch(rows, main, counts) {
   const local = rows.filter(r => (!r.item.hidden || r.item.starred) && matches(r, query));
-  const c = el("li");
-  c.append(el("b", null, String(local.length)), document.createTextNode(" in FrontDesk"));
-  counts.append(c);
+  const g = gmailSearch && gmailSearch.q === query ? gmailSearch : null;
+  const known = new Set(rows.map(r => r.item.id));
+  const found = g && g.results ? g.results.filter(r => !known.has(r.id)) : [];
+  const seen = new Set(known);
+  const fromSlack = g && Array.isArray(g.slack) ? g.slack.filter(r => !seen.has(r.id) && seen.add(r.id)) : [];
+  const slackOn = slackConnected(g);
+  const tabs = searchTabs(g);
+  if (!tabs.includes(searchTab)) searchTab = "frontdesk";
+  const ran = g && !g.loading && !g.error;
+  const n = { frontdesk: String(local.length),
+              gmail: g && g.loading ? "\u2026" : ran && !g.gmail_error ? String(found.length) : "",
+              slack: g && g.loading ? "\u2026" : ran && !g.slack_error ? String(fromSlack.length) : "" };
+  for (const [tab, label] of [["frontdesk", " in FrontDesk"], ["gmail", " in Gmail"], ["slack", " in Slack"]]) {
+    if (!tabs.includes(tab) || !n[tab] || n[tab] === "\u2026") continue;
+    const c = el("li");
+    c.append(el("b", null, n[tab]), document.createTextNode(label));
+    counts.append(c);
+  }
   const sec = el("section", "searchres");
   sec.setAttribute("aria-label", "Search results");
   const head = el("div", "sechead");
@@ -1418,36 +1918,125 @@ function renderSearch(rows, main, counts) {
   clear.type = "button";
   clear.addEventListener("click", clearSearch);
   head.append(el("h2", null, "Search: " + query), clear);
-  sec.append(head, el("h3", null, "In FrontDesk (" + local.length + ")"));
+  const bar = el("div", "searchtabs");
+  bar.setAttribute("role", "tablist");
+  bar.setAttribute("aria-label", "Search sources");
+  const names = { frontdesk: "FrontDesk", gmail: "Gmail", slack: "Slack" };
+  for (const tab of tabs) {
+    const b = el("button", "searchtab");
+    b.type = "button";
+    b.setAttribute("role", "tab");
+    b.setAttribute("aria-selected", String(tab === searchTab));
+    b.id = "searchtab-" + tab;
+    b.append(el("span", "name", names[tab]));
+    if (n[tab]) b.append(el("span", "count", n[tab]));
+    else b.classList.add("pending");
+    b.title = tab === "frontdesk" ? "Threads FrontDesk has synced" : n[tab] ? "" : "Press Enter to search " + names[tab];
+    b.addEventListener("click", () => pickSearchTab(tab));
+    bar.append(b);
+  }
+  sec.append(head, bar);
+  const pane = tab => {
+    const p = el("div", "searchpane");
+    p.setAttribute("role", "tabpanel");
+    p.setAttribute("aria-labelledby", "searchtab-" + tab);
+    p.hidden = tab !== searchTab;
+    sec.append(p);
+    return p;
+  };
+  const both = slackOn ? "Gmail and Slack" : "Gmail";
+  // FrontDesk
+  const pf = pane("frontdesk");
   if (local.length) {
     const ul = el("ul", "list");
     for (const r of local) ul.append(buildCard(r.item, r.triage));
-    sec.append(ul);
+    pf.append(ul);
   } else {
-    sec.append(el("p", "status", "No synced thread matches."));
+    pf.append(el("p", "status", "No synced thread matches."));
   }
-  const g = gmailSearch && gmailSearch.q === query ? gmailSearch : null;
-  const known = new Set(rows.map(r => r.item.id));
-  const found = g && g.results ? g.results.filter(r => !known.has(r.id)) : [];
-  sec.append(el("h3", null, "All of Gmail" + (g && g.results ? " (" + found.length + ")" : "")));
+  if (!g && !STATIC) pf.append(el("p", "kbdhint", "Press Enter to search all of " + both + ", archived mail included."));
+  // Gmail
+  const pg = pane("gmail");
   let note = null;
   if (STATIC) note = "Searching all of Gmail runs against your own account in the live app.";
-  else if (!g) note = "Press Enter to search all of Gmail, archived mail included.";
-  else if (g.loading) note = "Searching Gmail\u2026";
+  else if (!g) note = "Press Enter to search all of " + both + ", archived mail included.";
+  else if (g.loading) note = "Searching " + both + "\u2026";
   else if (g.error) note = "Couldn't search Gmail: " + g.error;
+  else if (g.gmail_error) note = "Couldn't search Gmail: " + g.gmail_error;
   else if (g.demo) note = "Searching all of Gmail is off in demo mode.";
   else if (!found.length) note = "No other matches in Gmail.";
-  if (note) sec.append(el("p", "status", note));
+  if (note) pg.append(el("p", "status", note));
   if (found.length) {
     const ul = el("ul", "list");
     for (const r of found) ul.append(buildResultCard(r));
-    sec.append(ul);
+    pg.append(ul);
     if (g.results.length >= 20) {
-      sec.append(el("p", "kbdhint", "The 20 newest matches. Narrow it with Gmail's operators, " +
-                                    "such as from:, before: or has:attachment."));
+      pg.append(el("p", "kbdhint", "The 20 newest matches. Narrow it with Gmail's operators, " +
+                                   "such as from:, before: or has:attachment."));
+    }
+  }
+  // Slack
+  if (slackOn) {
+    const ps = pane("slack");
+    let snote = null;
+    if (STATIC) snote = "Searching all of Slack runs against your own workspace in the live app.";
+    else if (!g) snote = "Press Enter to search all of " + both + ".";
+    else if (g.loading) snote = "Searching " + both + "\u2026";
+    else if (g.slack_error) snote = "Couldn't search Slack: " + g.slack_error;
+    else if (!fromSlack.length) snote = "No other matches in Slack.";
+    if (snote) ps.append(el("p", "status", snote));
+    if (fromSlack.length) {
+      const ul = el("ul", "list");
+      for (const r of fromSlack) ul.append(buildSlackResult(r));
+      ps.append(ul);
+      if ((g.slack || []).length >= 20) {
+        ps.append(el("p", "kbdhint", "The 20 newest matches. Narrow it with Slack's operators, " +
+                                     "such as from:@name, in:#channel or after:2026-10-01."));
+      }
     }
   }
   main.append(sec);
+}
+
+// A Slack message found by search: not synced, not ranked. Its row shows the message itself;
+// opening it opens the conversation in Slack.
+function buildSlackResult(r) {
+  const li = el("li", "card result");
+  li.dataset.id = r.id;
+  const row = el("button", "row");
+  row.type = "button";
+  const dot = el("span", "dot none");
+  dot.title = "Not ranked: found by search";
+  const meta = el("span", "meta");
+  const line1 = el("span", "line1");
+  line1.append(el("span", "sender", r.sender || "Slack"), el("span", "subject", r.where || "Slack"));
+  meta.append(line1, el("span", "reason", r.text || "(no text)"));
+  const when = el("span", "when", relTime(r.updated_at));
+  when.title = absTime(r.updated_at);
+  row.append(dot, meta, when);
+  row.addEventListener("focus", () => { if (currentId !== r.id) setCurrent(li); });
+  row.addEventListener("click", () => {
+    setCurrent(li);
+    const u = safeOpenUrl(r.url);
+    if (u) window.open(u, "_blank", "noopener");
+  });
+  row.title = "Open in Slack";
+  // Select (x) and Keep, under the age like a thread's tools: Keep brings the conversation into
+  // FrontDesk, where it gets read state, Done, star and reply.
+  const pick = el("input", "rowcheck");
+  pick.type = "checkbox";
+  pick.title = "Select (x)";
+  pick.setAttribute("aria-label", "Select " + (r.where || "Slack match"));
+  pick.checked = selected.has(r.id);
+  if (pick.checked) li.classList.add("selected");
+  pick.addEventListener("click", ev => { ev.stopPropagation(); toggleSelect(li, ev.shiftKey); });
+  const tools = el("span", "rowtools");
+  const keep = iconButton("rowtool btn-keep", "i-keep", "Keep in FrontDesk");
+  keep.addEventListener("click", ev => { ev.stopPropagation(); bulkKeep([resultItem(r)]); });
+  tools.append(keep);
+  li.append(row, pick, tools);
+  li.addEventListener("mouseenter", () => centerTools(li));
+  return li;
 }
 
 async function searchGmail(q) {
@@ -1459,7 +2048,9 @@ async function searchGmail(q) {
     const res = await fetch("/api/search?q=" + encodeURIComponent(q), { cache: "no-store" });
     const out = await res.json();
     if (!res.ok) throw new Error((out && out.error) || "HTTP " + res.status);
-    next = { q, results: Array.isArray(out.results) ? out.results : [], demo: !!out.demo };
+    next = { q, results: Array.isArray(out.results) ? out.results : [], demo: !!out.demo,
+             gmail_error: out.gmail_error || "",
+             slack: Array.isArray(out.slack) ? out.slack : null, slack_error: out.slack_error || "" };
   } catch (e) {
     next = { q, error: e.message };
   }
@@ -1471,6 +2062,7 @@ async function searchGmail(q) {
 function clearSearch() {
   const box = document.getElementById("search");
   if (box) { box.value = ""; box.blur(); }
+  searchTab = "frontdesk";
   if (!query && !gmailSearch) return;
   query = "";
   gmailSearch = null;
@@ -1483,7 +2075,15 @@ function setupSearch() {
   box.addEventListener("input", () => { query = box.value.trim(); render(window.__items || []); });
   box.addEventListener("keydown", e => {
     // Enter searches Gmail and leaves the box, as Gmail does, so j/k move through the results.
-    if (e.key === "Enter") { e.preventDefault(); box.blur(); searchGmail(query); }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      box.blur();
+      // Nothing synced matches: the wider search is what you want, so show it.
+      if (!(window.__items || []).some(r => (!r.item.hidden || r.item.starred) && matches(r, query))) {
+        searchTab = "gmail";
+      }
+      searchGmail(query);
+    }
   });
 }
 
@@ -1498,6 +2098,10 @@ async function load() {
       rows = rows.map(r => {
         r.item.hidden = staticHidden.get(r.item.id) || r.item.hidden || "";
         if (staticStars.has(r.item.id)) r.item.starred = staticStars.get(r.item.id);
+        if (staticUnread.has(r.item.id)) {
+          const rest = (r.item.labels || []).filter(l => l !== "UNREAD");
+          r.item.labels = staticUnread.get(r.item.id) ? [...rest, "UNREAD"] : rest;
+        }
         r.item.updated_at = shiftIso(r.item.updated_at, delta);
         for (const m of r.item.messages) m.sent_at = shiftIso(m.sent_at, delta);
         if (r.triage) r.triage.triaged_at = shiftIso(r.triage.triaged_at, delta);
@@ -1510,7 +2114,11 @@ async function load() {
       }).filter(r => !r.item.hidden || r.item.starred);   // same rule as the server's list
     }
     window.__items = rows;
+    for (const id of [...selected]) {
+      if (!rows.some(r => r.item.id === id && !r.item.hidden) && !searchResult(id)) selected.delete(id);
+    }
     render(rows);
+    paintSelection();
     const again = visibleCards().find(li => li.dataset.id === currentId);
     if (again) again.classList.add("current");
   } catch (e) {
@@ -1899,17 +2507,26 @@ function mergeStep(li, p, others, act, reload) {
 // ---- Keyboard shortcuts, after Gmail's: j/k move, o or Enter open and close, u only closes, e archive,
 // r reply, m memory, ? help. Never while typing in a box, and never with Ctrl/Cmd/Alt held.
 const SHORTCUTS = [
-  ["/", "Search: type to filter, Enter searches all of Gmail"],
+  ["/", "Search: type to filter, Enter searches all of Gmail and Slack"],
+  ["h / l", "Search results: previous / next tab (FrontDesk, Gmail, Slack)"],
   ["j / k", "Next / previous thread"],
   ["o or Enter", "Open the thread; press again to close it"],
   ["u", "Close the thread (never opens one)"],
-  ["e", "Archive (Gmail) or Done (Slack)"],
+  ["e or y", "Archive (Gmail) or Done (Slack)"],
+  ["[ / ]", "Archive, then open the thread above / below"],
+  ["Shift+I / Shift+U", "Mark read / unread"],
+  ["z", "Undo the last archive, move, read change or send"],
+  ["Shift+N", "Sync now: fetch new mail and Slack, and rank what is new (the Sync button)"],
+  ["x", "Select the thread (Shift-click a checkbox for a range)"],
+  ["* then a / n / r / u", "Select all / none / read / unread"],
+  ["Esc", "Clear the selection, leave the reply box, or close this list"],
+  ["a", "Reply all (Gmail)"],
+  ["g then i / g then s", "Go to the inbox / the Starred view"],
   ["s", "Star or unstar (Gmail: in Gmail too; Slack: in FrontDesk only)"],
   ["r", "Reply (jump to the reply box)"],
   ["v", "Move to another section"],
   ["m", "Memory: everything FrontDesk remembers"],
   ["?", "Show or hide this list"],
-  ["Esc", "Leave the reply box / close this list"],
 ];
 let currentId = null;
 
@@ -1923,11 +2540,25 @@ function visibleCards() {
   return allCards().filter(li => li.offsetParent !== null && !li.closest("details:not([open])"));
 }
 
+// The hover tools sit under the row's time, centred on it. The time is inside the row button
+// and the tools cannot be (a button holds no buttons), so they are placed by measurement when
+// they appear: on hover and when the row becomes current.
+function centerTools(li) {
+  const tools = li && li.querySelector(":scope > .rowtools");
+  const when = li && li.querySelector(":scope > .row .when");
+  if (!tools || !when || !tools.style) return;
+  const w = when.getBoundingClientRect(), c = li.getBoundingClientRect();
+  const width = tools.offsetWidth || 54;
+  if (!w.width) return;
+  tools.style.right = Math.round(c.right - (w.left + w.width / 2) - width / 2) + "px";
+}
+
 function setCurrent(li) {
   for (const c of document.querySelectorAll("li.card.current")) c.classList.remove("current");
   if (!li) { currentId = null; return; }
   li.classList.add("current");
   currentId = li.dataset.id;
+  if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => centerTools(li));
   li.scrollIntoView({ block: "nearest" });
   // Keep one selection on screen: if a row button holds focus (after a click), move focus to the
   // new current row so its focus ring does not stay behind on the old one.
@@ -1976,7 +2607,7 @@ function toggleHelp(force) {
 
 function buildHelp() {
   const h = document.getElementById("help");
-  const box = el("div", "helpbox");
+  const box = el("div", "helpbox keysbox");
   box.append(el("h2", null, "Keyboard shortcuts"));
   const dl = el("dl");
   for (const [k, v] of SHORTCUTS) dl.append(el("dt", null, k), el("dd", null, v));
@@ -1988,9 +2619,12 @@ function buildHelp() {
 function onKey(e) {
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   const t = e.target;
-  const typing = t && (t.tagName === "TEXTAREA" || t.tagName === "INPUT" ||
-                       t.tagName === "SELECT" || t.isContentEditable);
+  // A checkbox holds focus after a click but takes no text: keys still act (Shift+I on a
+  // selection made by clicking checkboxes).
+  const typing = t && (t.tagName === "TEXTAREA" || t.isContentEditable || t.tagName === "SELECT" ||
+                       (t.tagName === "INPUT" && !["checkbox", "radio", "button"].includes(t.type)));
   if (e.key === "Escape") {
+    if (!typing && clearSelection()) return;
     if (t && t.id === "search") { clearSearch(); return; }
     if (!typing && query && document.getElementById("help").hidden &&
         document.getElementById("profilepanel").hidden) { clearSearch(); return; }
@@ -2003,7 +2637,38 @@ function onKey(e) {
   if (typing) return;
   const li = currentCard();
   // A search result is not a stored thread: only moving and opening apply to it.
-  if (li && li.classList.contains("result") && "esvru".includes(e.key)) return;
+  if (li && li.classList.contains("result") && !selected.size && "esvruyIUa[]".includes(e.key)) return;
+  if (query && (e.key === "h" || e.key === "l")) { switchSearchTab(e.key === "l" ? 1 : -1); e.preventDefault(); return; }
+  // Gmail's two-key "go to": g, then i (inbox) or s (starred) within a second and a half.
+  if (gPending) {
+    gPending = false;
+    if (e.key === "i" || e.key === "s") {
+      view = e.key === "s" ? "starred" : "all";
+      if (query) clearSearch(); else render(window.__items || []);
+      e.preventDefault();
+      return;
+    }
+  }
+  if (e.key === "g") { gPending = true; setTimeout(() => { gPending = false; }, 1500); e.preventDefault(); return; }
+  // Gmail's selection chord: *, then a (all), n (none), r (read) or u (unread).
+  if (starChord) {
+    starChord = false;
+    if ("anru".includes(e.key)) { starPick(e.key); e.preventDefault(); return; }
+  }
+  if (e.key === "*") { starChord = true; setTimeout(() => { starChord = false; }, 1500); e.preventDefault(); return; }
+  if (e.key === "x") { if (li) toggleSelect(li, false); e.preventDefault(); return; }
+  // With a selection, the keys that act on one thread act on all of it.
+  if (selected.size) {
+    const act = { e: bulkArchive, y: bulkArchive, I: () => bulkRead(true), U: () => bulkRead(false),
+                  s: bulkStar }[e.key];
+    if (act) { act(); e.preventDefault(); return; }
+    if (e.key === "v") {
+      const m = document.querySelector("#selbar .selmove");
+      if (m) { m.focus(); try { if (m.showPicker) m.showPicker(); } catch (err) { /* focus is enough */ } }
+      e.preventDefault();
+      return;
+    }
+  }
   switch (e.key) {
     case "/": {
       const box = document.getElementById("search");
@@ -2023,7 +2688,40 @@ function onKey(e) {
       if (li && isOpen(li)) li.querySelector(":scope > .row").click();
       break;
     case "e":
+    case "y":
       if (li) dismissCard(li);
+      break;
+    case "[":
+    case "]":
+      if (li) archiveAndStep(li, e.key === "]" ? 1 : -1);
+      break;
+    case "I":
+      if (li && cardItems.get(li)) setRead(cardItems.get(li), true, li);
+      break;
+    case "U":
+      if (li && cardItems.get(li)) setRead(cardItems.get(li), false, li);
+      break;
+    case "N": {
+      // Gmail's "update" key: the Sync button, unless a sync is already running.
+      const b = document.getElementById("sync");
+      if (b && !b.disabled) syncNow();
+      break;
+    }
+    case "z": {
+      // Undo is whatever the toast on screen offers (archive, done, move, read change, send).
+      const t = document.getElementById("toast");
+      const u = t && !t.hidden ? t.querySelector(".linkbtn") : null;
+      if (u) u.click(); else toast("Nothing to undo.");
+      break;
+    }
+    case "a":
+      if (li && cardItems.get(li) && cardItems.get(li).source !== "slack") {
+        if (!isOpen(li)) li.querySelector(":scope > .row").click();
+        const box = li.querySelector(".replyall-box");
+        if (box) box.checked = true;
+        const ta = li.querySelector(".reply textarea");
+        if (ta) { ta.focus(); ta.scrollIntoView({ block: "center" }); }
+      }
       break;
     case "s":
       if (li && cardItems.get(li)) toggleStar(cardItems.get(li));
@@ -2082,8 +2780,12 @@ async function pollStatus() {
     const res = await fetch("/api/status", { cache: "no-store" });
     if (!res.ok) return;
     const s = await res.json();
-    const changed = lastSyncSeen !== null && s.at && s.at !== lastSyncSeen;
-    lastSyncSeen = s.at || "";
+    // Reload only after a sync that changed something (or failed): an unchanged sync would just
+    // re-render every open page, on every device, every 15 minutes.
+    const mark = s.changed_at || "";
+    const changed = lastSyncSeen !== null && mark && mark !== lastSyncSeen;
+    lastSyncSeen = mark;
+    slackSynced = s.slack === true;
     showSyncLine(s);
     if (changed) {
       if (!busy()) {

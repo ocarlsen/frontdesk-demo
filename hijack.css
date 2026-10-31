@@ -1,0 +1,67 @@
+/* "Try to hijack it": the attack gallery. Colours come from app.css's tokens. */
+.hijack .top { display: block; }
+.hj-lede { max-width: 720px; color: var(--muted); margin: 6px 0 14px; }
+.hj-models { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 6px; }
+.hj-models button { font: inherit; font-size: 14px; padding: 6px 12px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; }
+.hj-models button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent);
+  font-weight: 600; }
+.hj-models .score { color: var(--muted); font-weight: 400; margin-left: 4px; }
+.hj-nav { margin: 4px 0 0; font-size: 14px; }
+.hj-note { max-width: 720px; color: var(--muted); font-size: 13px; margin: 6px 0 4px; }
+.hj-main { display: grid; grid-template-columns: 250px 1fr; gap: 20px; align-items: start; }
+.hj-list { position: sticky; top: 12px; }
+.hj-list h2 { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--muted); margin: 14px 0 4px; }
+.hj-list button { display: flex; justify-content: space-between; gap: 8px; width: 100%;
+  text-align: left; font: inherit; font-size: 13.5px; padding: 5px 8px; border: 0;
+  border-radius: 6px; background: none; color: var(--text); cursor: pointer; }
+.hj-list button:hover { background: var(--field); }
+.hj-list button[aria-current="true"] { background: var(--card); box-shadow: var(--shadow);
+  font-weight: 600; }
+.hj-list .mark { flex: none; }
+.ok { color: #1a7f37; }
+.bad { color: #b3261e; }
+.hj-pick { display: none; }
+.hj-case { background: var(--card); border-radius: 10px; box-shadow: var(--shadow);
+  padding: 18px 20px; min-width: 0; }
+.hj-case h2 { font-size: 18px; margin: 0 0 2px; }
+.hj-case .group { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+.hj-case h3 { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--muted); margin: 18px 0 6px; }
+.hj-verdict { display: inline-block; font-weight: 600; font-size: 13px; padding: 2px 10px;
+  border-radius: 999px; margin-left: 8px; vertical-align: 2px; }
+.hj-verdict.ok { background: color-mix(in srgb, #1a7f37 14%, var(--card)); }
+.hj-verdict.bad { background: color-mix(in srgb, #b3261e 14%, var(--card)); }
+.hj-mail { border: 1px solid var(--line); border-radius: 8px; background: var(--field);
+  padding: 10px 12px; margin: 0 0 8px; }
+.hj-mail .hdr { font-size: 13px; color: var(--muted); margin: 0 0 6px; overflow-wrap: anywhere; }
+.hj-mail .hdr b { color: var(--text); font-weight: 600; }
+.hj-mail pre, .hj-reply { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0;
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.hj-mail .src { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
+mark.planted { background: color-mix(in srgb, #e07a1f 30%, transparent); color: inherit;
+  border-radius: 3px; padding: 0 1px; }
+.hj-did dl { display: grid; grid-template-columns: 90px 1fr; gap: 4px 12px; margin: 0; }
+.hj-did dt { color: var(--muted); }
+.hj-did dd { margin: 0; }
+.hj-reply { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+  background: var(--field); }
+.hj-checks { list-style: none; padding: 0; margin: 0; }
+.hj-checks li { margin: 4px 0; }
+.hj-checks .mark { display: inline-block; width: 1.4em; font-weight: 700; }
+.hj-step { display: flex; justify-content: space-between; margin: 18px 0 0; }
+.hj-step button { font: inherit; font-size: 14px; padding: 6px 12px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; }
+.hj-foot { max-width: 860px; margin: 0 auto; padding: 8px 16px 40px; color: var(--muted);
+  font-size: 13.5px; }
+@media (max-width: 760px) {
+  .hj-main { grid-template-columns: 1fr; }
+  .hj-list { display: none; }
+  .hj-pick { display: block; }
+  label.hj-pick { font-size: 13px; color: var(--muted); margin: 0 0 -12px; }
+  select.hj-pick { font: inherit; font-size: 16px; padding: 8px; border-radius: 8px;
+    border: 1px solid var(--line); background: var(--card); color: var(--text); width: 100%; }
+  .hj-case { padding: 14px; }
+  .hj-step button { min-height: 44px; }
+}
