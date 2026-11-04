@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="120" viewBox="0 0 560 120">
+  <rect width="560" height="120" rx="6" fill="#1f2328"/>
+  <g fill="none" stroke="#3fb950" stroke-width="3" stroke-linecap="round">
+    <path d="M28 44h40M28 60h64M28 76h28"/>
+  </g>
+  <g fill="none" stroke="#f85149" stroke-width="3" stroke-linecap="round">
+    <path d="M28 52h22M28 68h48"/>
+  </g>
+  <text x="120" y="62" font-family="Helvetica, Arial, sans-serif" font-size="30" font-weight="700" fill="#f0f6fc">The Weekly Diff</text>
+  <text x="120" y="90" font-family="Helvetica, Arial, sans-serif" font-size="15" fill="#8b949e">Systems, queues and small tools. Issue #212.</text>
+</svg>
