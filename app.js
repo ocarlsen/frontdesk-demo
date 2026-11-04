@@ -341,7 +341,7 @@ function buildCard(item, triage) {
   row.append(dot, meta, when);
 
   let detail = null;
-  row.addEventListener("focus", () => { if (currentId !== item.id) setCurrent(li); });
+  row.addEventListener("focus", () => { if (currentId !== item.id) setCurrent(li, false); });
   row.addEventListener("click", () => {
     if (li.dataset.swiped) { delete li.dataset.swiped; return; }   // the end of a swipe or long press
     if (selected.size && TOUCH.matches) { toggleSelect(li, false); return; }   // selecting: a tap picks
@@ -706,11 +706,12 @@ async function setRead(item, read, li) {
   try {
     const out = await postAction(read ? "read" : "unread", item.id, read ? { explicit: true } : undefined);
     if (out.here_only) {
-      toast("Marked read here. Slack keeps its own read state for threads.", "Undo",
-            () => setRead(item, false, li));
+      toast("Marked read here. Slack follows once every older message in that channel is " +
+            "read or done here.", "Undo", () => setRead(item, false, li));
       return;
     }
-    toast(read ? "Marked read." : "Marked unread.", "Undo", () => setRead(item, !read, li));
+    toast(out.slack_marked ? "Marked read, in Slack too." : read ? "Marked read." : "Marked unread.",
+          "Undo", () => setRead(item, !read, li));
   } catch (e) {
     item.labels = before;
     paintRead(item);
@@ -791,7 +792,7 @@ async function restore(item, btn) {
 const STAR_SLACK_NOTE = "Starred in FrontDesk only: Slack has no supported API for saving a " +
   "message for later, so nothing changes in Slack";
 const starButtons = new Map();   // item id -> its star buttons (row and detail)
-let view = "all";                // "all" | "starred"
+let view = "all";                // "all" | "starred" | "unread"
 // Search: `query` filters the synced threads as you type; Enter also asks Gmail (all mail,
 // archived too) through GET /api/search. gmailSearch holds that answer for one query:
 // {q, loading} | {q, results, demo} | {q, error}. Results live in this tab only.
@@ -1649,16 +1650,20 @@ function expandAllButton(ul) {
   return b;
 }
 
-function starredToggle(n) {
+// The views beside the section counts: Starred and Unread, each a toggle back to all threads.
+function viewToggle(kind, n) {
   const c = el("li");
-  const b = el("button", "linkbtn starview", view === "starred" ? "Show all threads" :
-    "\u2605 " + n + " Starred");
+  const label = kind === "starred" ? "\u2605 " + n + " Starred" : "\u25CF " + n + " Unread";
+  const b = el("button", "linkbtn " + (kind === "starred" ? "starview" : "unreadview"),
+               view === kind ? "Show all threads" : label);
   b.type = "button";
-  b.setAttribute("aria-pressed", String(view === "starred"));
-  b.addEventListener("click", () => { view = view === "starred" ? "all" : "starred"; render(window.__items || []); });
+  b.setAttribute("aria-pressed", String(view === kind));
+  b.addEventListener("click", () => { view = view === kind ? "all" : kind; render(window.__items || []); });
   c.append(b);
   return c;
 }
+
+function starredToggle(n) { return viewToggle("starred", n); }
 
 function render(rows) {
   const main = document.getElementById("main");
@@ -1668,10 +1673,27 @@ function render(rows) {
   starButtons.clear();
   if (query) { renderSearch(rows, main, counts); return; }
   const starred = rows.filter(r => r.item.starred);
+  const unread = rows.filter(r => !r.item.hidden && isUnread(r.item));
+
+  if (view === "unread") {
+    // One list, in ranked order: every unread thread, Gmail and Slack, whatever its section.
+    counts.append(starredToggle(starred.length), viewToggle("unread", unread.length));
+    const sec = el("section");
+    sec.setAttribute("aria-label", "Unread");
+    const head = el("div", "sechead");
+    head.append(el("h2", null, "Unread (" + unread.length + ")"));
+    sec.append(head);
+    if (!unread.length) sec.append(el("p", "status", "Nothing unread."));
+    const ul = el("ul", "list");
+    for (const r of unread) ul.append(buildCard(r.item, r.triage));
+    sec.append(ul);
+    main.append(sec);
+    return;
+  }
 
   if (view === "starred") {
     // One list, in ranked order; archived or done Gmail threads stay while Gmail keeps the star.
-    counts.append(starredToggle(starred.length));
+    counts.append(starredToggle(starred.length), viewToggle("unread", unread.length));
     const sec = el("section");
     sec.setAttribute("aria-label", "Starred");
     const head = el("div", "sechead");
@@ -1694,8 +1716,15 @@ function render(rows) {
   }
 
   if (!rows.length) {
-    const p = el("p", "status", starred.length ? "Inbox clear." : "Nothing synced yet. Run: ");
-    if (!starred.length) p.append(el("code", null, "frontdesk sync"));
+    const p = el("p", "status", starred.length ? "Inbox clear." : "Nothing synced yet. ");
+    if (!starred.length && !STATIC) {
+      const b = el("button", "btn small primary", "Connect Gmail");
+      b.type = "button";
+      b.addEventListener("click", openGoogle);
+      p.append(b, " then Sync, or run ", el("code", null, "frontdesk sync"), " in a Terminal.");
+    } else if (!starred.length) {
+      p.append("Run: ", el("code", null, "frontdesk sync"));
+    }
     main.append(p);
     if (starred.length) counts.append(starredToggle(starred.length));
     return;
@@ -1730,7 +1759,7 @@ function render(rows) {
     }
     main.append(sec);
   }
-  counts.append(starredToggle(starred.length));
+  counts.append(starredToggle(starred.length), viewToggle("unread", unread.length));
 }
 
 // ---- Search ----
@@ -1763,7 +1792,7 @@ function buildResultCard(r) {
   row.append(dot, meta, when);
   row.setAttribute("aria-expanded", "false");
   let detail = null;
-  row.addEventListener("focus", () => { if (currentId !== r.id) setCurrent(li); });
+  row.addEventListener("focus", () => { if (currentId !== r.id) setCurrent(li, false); });
   row.addEventListener("click", () => {
     setCurrent(li);
     const open = row.getAttribute("aria-expanded") === "true";
@@ -2014,7 +2043,7 @@ function buildSlackResult(r) {
   const when = el("span", "when", relTime(r.updated_at));
   when.title = absTime(r.updated_at);
   row.append(dot, meta, when);
-  row.addEventListener("focus", () => { if (currentId !== r.id) setCurrent(li); });
+  row.addEventListener("focus", () => { if (currentId !== r.id) setCurrent(li, false); });
   row.addEventListener("click", () => {
     setCurrent(li);
     const u = safeOpenUrl(r.url);
@@ -2126,7 +2155,10 @@ async function load() {
   }
 }
 
-async function syncNow() {
+// auto: started by opening the page, not by the owner, so a refusal (a sync already running,
+// demo mode) stays quiet; a failed sync (502, recorded by the server) shows its status at
+// once, so a failure is never hidden behind a reload.
+async function syncNow(auto = false) {
   const btn = document.getElementById("sync");
   const note = document.getElementById("syncnote");
   if (STATIC) {
@@ -2136,17 +2168,21 @@ async function syncNow() {
   btn.disabled = true;
   btn.textContent = "Syncing...";
   note.textContent = "";
+  note.classList.remove("err");
   try {
     const res = await fetch("/api/sync", { method: "POST", headers: { "X-FrontDesk": "sync" } });
     const out = await res.json();
-    if (!res.ok) throw new Error(out.error || "HTTP " + res.status);
+    if (!res.ok) throw Object.assign(new Error(out.error || "HTTP " + res.status), { status: res.status });
     let msg = "Synced " + out.synced + ", removed " + out.removed + ", ranked " + out.triaged;
     if (out.failed) msg += ", " + out.failed + " failed";
     if (out.triage_error) msg += ". Ranking skipped: " + out.triage_error;
     note.textContent = msg;
     await load();
   } catch (e) {
-    note.textContent = "Sync failed: " + e.message;
+    note.textContent = auto ? "" : "Sync failed: " + e.message;
+    note.classList.toggle("err", !auto);
+    if (!auto) offerConnect(note, e.message);
+    else if (e.status === 502) pollStatus();   // a failed sync, not a refusal: show it now
   } finally {
     btn.disabled = false;
     btn.textContent = "Sync";
@@ -2182,7 +2218,9 @@ async function openProfile() {
   const row = el("div", "actions");
   row.append(save, cancel);
   const sitBox = el("div", "situation");
-  box.append(ta, signLabel, sign, status, row, sitBox);
+  const googleBox = el("div", "situation google");
+  box.append(ta, signLabel, sign, status, row, googleBox, sitBox);
+  renderGoogle(googleBox);
   panel.replaceChildren(box);
   panel.hidden = false;
   const load = async () => {
@@ -2223,13 +2261,149 @@ async function openProfile() {
   ta.focus();
 }
 
-// ---- What's going on: what is live for you right now, sent to Ask with each question.
-// items: [{id, text, author, created_at, updated_at}]. Anything you add, edit or confirm here
-// is recorded as written by you.
+// ---- Google: connect, reconnect or disconnect Gmail's two permissions from the page.
+async function postGoogle(body) {
+  const res = await fetch("/api/google", { method: "POST",
+    headers: { "X-FrontDesk": "google", "Content-Type": "application/json" },
+    body: JSON.stringify(body) });
+  const out = await res.json();
+  if (!res.ok) throw new Error(out.error || "HTTP " + res.status);
+  return out;
+}
+
+const GOOGLE_KINDS = [
+  ["read", "Gmail", "Reads your inbox to sync and rank it. Read-only."],
+  ["actions", "Gmail actions", "Archive, star, save drafts and send replies you confirm. " +
+    "A separate permission, granted on its own."],
+];
+
+// Just the Google account controls, for the Connect Gmail buttons (Profile shows them too).
+function openGoogle() {
+  const panel = document.getElementById("profilepanel");
+  panel.setAttribute("aria-label", "Google account");
+  const box = el("div", "helpbox");
+  const g = el("div", "google");
+  const close = el("button", "btn", "Close");
+  close.type = "button";
+  close.addEventListener("click", () => { panel.hidden = true; });
+  const row = el("div", "actions");
+  row.append(close);
+  box.append(g, row);
+  panel.replaceChildren(box);
+  panel.hidden = false;
+  renderGoogle(g);
+}
+
+async function renderGoogle(box) {
+  box.replaceChildren(el("h3", null, "Google account"));
+  if (STATIC) { box.append(el("p", "kbdhint", "Demo: connecting Gmail is off here.")); return; }
+  let st;
+  try {
+    st = await (await fetch("/api/google", { cache: "no-store" })).json();
+  } catch (e) { box.append(el("p", "kbdhint", "Could not load: " + e.message)); return; }
+  if (st.demo) { box.append(el("p", "kbdhint", "Demo: connecting Gmail is off here.")); return; }
+  if (!st.desktop_client && !st.web_client) {
+    box.append(el("p", "kbdhint", "No Google OAuth client yet: create a Desktop OAuth client in " +
+      "Google Cloud Console and save its JSON as ~/.frontdesk/client_secret.json (see docs/setup.md)."));
+    return;
+  }
+  const note = el("p", "kbdhint");
+  for (const [kind, name, what] of GOOGLE_KINDS) {
+    const li = el("div", "situationitem");
+    li.append(el("p", "situationtext", name + ": " + (st[kind] ? "connected" : "not connected")),
+      el("p", "kbdhint", what));
+    const row = el("div", "actions");
+    const go = el("button", "btn small" + (st[kind] ? "" : " primary"),
+      st[kind] ? "Reconnect" : "Connect");
+    go.type = "button";
+    go.addEventListener("click", () => connectGoogle(kind, box, note));
+    row.append(go);
+    if (st[kind]) {
+      const off = el("button", "btn small", "Disconnect");
+      off.type = "button";
+      off.title = "Delete this permission's sign-in from this computer";
+      off.addEventListener("click", async () => {
+        if (off.dataset.armed !== "1") {   // two clicks, no browser dialog
+          off.dataset.armed = "1";
+          off.textContent = "Disconnect: click again";
+          return;
+        }
+        try { await postGoogle({ op: "disconnect", kind }); renderGoogle(box); }
+        catch (e) { note.textContent = "Disconnect failed: " + e.message; }
+      });
+      row.append(off);
+    }
+    li.append(row);
+    box.append(li);
+  }
+  box.append(note);
+}
+
+async function connectGoogle(kind, box, note) {
+  // Open the tab inside the click, before any await, so a popup blocker allows it.
+  const tab = window.open("", "_blank");
+  let out;
+  try {
+    out = await postGoogle({ op: "start", kind });
+  } catch (e) {
+    if (tab) tab.close();
+    note.textContent = "Could not start: " + e.message;
+    return;
+  }
+  if (tab) tab.location = out.url; else window.open(out.url, "_blank");
+  if (out.mode === "paste") {
+    note.replaceChildren();
+    const help = el("p", "kbdhint", "Google's page opened in a new tab. After you allow access, " +
+      "that tab shows a page that cannot load (it points at localhost on this device). Copy " +
+      "its whole address from the address bar and paste it here.");
+    const paste = el("textarea");
+    paste.rows = 2;
+    paste.placeholder = "http://localhost:.../oauth/callback?state=...&code=...";
+    const fin = el("button", "btn small primary", "Finish connecting");
+    fin.type = "button";
+    fin.addEventListener("click", async () => {
+      try { await postGoogle({ op: "finish", url: paste.value }); renderGoogle(box); }
+      catch (e) { msg.textContent = e.message; }
+    });
+    const msg = el("p", "kbdhint");
+    const r = el("div", "actions");
+    r.append(fin);
+    note.append(help, paste, r, msg);
+    return;
+  }
+  note.textContent = "Finish in the new tab; this updates when Google is done.";
+  const was = JSON.stringify(await (await fetch("/api/google", { cache: "no-store" })).json());
+  for (let i = 0; i < 200; i++) {   // up to ~10 minutes, like the sign-in link
+    await new Promise(r => setTimeout(r, 3000));
+    if (!box.isConnected) return;
+    const now = JSON.stringify(await (await fetch("/api/google", { cache: "no-store" })).json());
+    if (now !== was) { renderGoogle(box); return; }
+  }
+}
+
+// ---- What's going on: what is live for you right now, sent to Ask and to each ranking.
+// items: [{id, text, author, created_at, updated_at, thread_id, closed_at, closed_reason, stale,
+// thread_gone}]. Anything you add, edit or confirm here is recorded as written by you.
+
+// One line on an item's state, or "" when it is open and current.
+function situationState(it) {
+  const why = { reply: "a reply arrived", done: "the thread was marked done",
+                archived: "the thread was archived" };
+  if (it.closed_at) {
+    return "Closed on " + fmtDate(it.closed_at) + ": " + (why[it.closed_reason] || "resolved") +
+      ". Ask and ranking no longer read it.";
+  }
+  if (it.stale) return "Stale: not restated since " + fmtDate(it.updated_at) +
+    ". Ranking leaves it out; Confirm keeps it.";
+  if (it.thread_gone) return "Its thread is no longer synced, so it cannot close by itself.";
+  if (it.thread_id) return "Closes by itself when someone else replies in its thread.";
+  return "";
+}
 function renderSituation(box, items, demo, reload) {
   box.replaceChildren(el("h3", null, "What's going on"));
   box.append(el("p", "kbdhint", "Decisions, open matters and anything else live for you now. " +
-    "Ask reads these with every question; lines you did not write are marked unconfirmed."));
+    "Ask reads these with every question, and ranking with every new or changed thread; " +
+    "lines you did not write are marked unconfirmed."));
   const act = async (kind, extra, failMsg) => {
     try { await postAction(kind, "", Object.assign({ author: "owner" }, extra)); reload(); }
     catch (e) { toast(failMsg + ": " + e.message); }
@@ -2239,6 +2413,9 @@ function renderSituation(box, items, demo, reload) {
     const li = el("div", "situationitem");
     const text = el("p", "situationtext", it.text);
     const label = el("p", "kbdhint authorlabel", authorLabel(it.author, it.updated_at));
+    const stateText = situationState(it);
+    const state = stateText ? el("p", "kbdhint situationstate", stateText) : null;
+    if (it.closed_at) li.classList.add("closed");
     const row = el("div", "actions");
     if (!demo) {
       const edit = el("button", "btn small", "Edit");
@@ -2268,12 +2445,21 @@ function renderSituation(box, items, demo, reload) {
         ok.addEventListener("click", () => act("situation_confirm", { id: it.id }, "Confirm failed"));
         row.append(ok);
       }
+      if (it.closed_at) {
+        const re = el("button", "btn small", "Reopen");
+        re.type = "button";
+        re.title = "Still open: keep it for Ask and ranking";
+        re.addEventListener("click", () => act("situation_reopen", { id: it.id }, "Reopen failed"));
+        row.append(re);
+      }
       const del = el("button", "btn small", "Delete");
       del.type = "button";
       del.addEventListener("click", () => act("situation_delete", { id: it.id }, "Delete failed"));
       row.append(del);
     }
-    li.append(text, label, row);
+    li.append(text, label);
+    if (state) li.append(state);
+    li.append(row);
     box.append(li);
   }
   if (demo) {
@@ -2298,6 +2484,197 @@ function renderSituation(box, items, demo, reload) {
 // then people, newest first. Delete, Merge and Confirm are yours alone (the server checks too).
 // A display name seen in mail is shown greyed as unconfirmed and never reaches the model: a
 // person has a name only once you type one.
+// ---- Test an attack: paste an email (or load one from the suite), rank it once with the model
+// you pick, and see the injection suite's checks on the result. Nothing is stored.
+const BUCKET_LABEL = { needs_you: "Needs you", fyi: "FYI", ignore: "Ignore" };
+
+async function openAttack() {
+  const panel = document.getElementById("profilepanel");
+  panel.setAttribute("aria-label", "Test an attack");
+  const box = el("div", "helpbox attackbox");
+  box.append(el("h2", null, "Test an attack"));
+  const close = el("button", "btn", "Close");
+  close.type = "button";
+  close.addEventListener("click", () => { panel.hidden = true; });
+  panel.replaceChildren(box);
+  panel.hidden = false;
+  let data = { demo: true, examples: [] };
+  try {
+    data = await (await fetch(STATIC ? "api/attack-examples.json" : "/api/attack/examples",
+      { cache: "no-store" })).json();
+  } catch (e) { box.append(el("p", "kbdhint", "Could not load: " + e.message)); }
+  if (STATIC || data.demo) { recordedAttacks(box, data.examples || [], close); return; }
+  box.append(el("p", "kbdhint", "Paste an email that tries to steer FrontDesk, or start from " +
+    "one of the attacks in the test suite. It is ranked once with the model you pick, on the " +
+    "same prompt the scoreboard measures, and checked the way the suite checks it. Nothing is " +
+    "stored; the cost is shown and counted in frontdesk stats."));
+  const pick = el("select");
+  pick.append(new Option("Start from an attack in the suite (optional)", ""));
+  for (const x of data.examples) pick.append(new Option(x.id + ": " + x.subject, x.id));
+  const field = (label, node) => { const l = el("label", null, label); box.append(l, node); return node; };
+  const from = el("input"); from.type = "text"; from.placeholder = "Name <sender@example.com>";
+  const subject = el("input"); subject.type = "text";
+  const body = el("textarea"); body.rows = 8;
+  const planted = el("textarea"); planted.rows = 2;
+  planted.placeholder = "One per line: the attacker's instruction, or what it wants written";
+  const why = el("p", "kbdhint");
+  box.append(pick, why);
+  field("From", from); field("Subject", subject); field("Email text", body);
+  field("Text the reply must not contain", planted);
+  box.append(el("label", null, "The ranking should be one of"));
+  const buckets = el("div", "buckets");
+  const ticks = {};
+  for (const k of ["needs_you", "fyi", "ignore"]) {
+    const l = el("label");
+    const c = el("input"); c.type = "checkbox"; ticks[k] = c;
+    l.append(c, BUCKET_LABEL[k]);
+    buckets.append(l);
+  }
+  box.append(buckets);
+  const model = el("select");
+  model.append(new Option("Default model", ""));
+  try {
+    for (const m of await (await fetch("/api/models", { cache: "no-store" })).json())
+      model.append(new Option(m.label, String(m.index)));
+  } catch (e) { /* the default model still works */ }
+  field("Model", model);
+  let exampleId = null;   // set while a suite example is loaded unedited
+  pick.addEventListener("change", () => {
+    const x = data.examples.find(e => e.id === pick.value);
+    exampleId = x ? x.id : null;
+    from.value = x ? x.from : ""; subject.value = x ? x.subject : ""; body.value = x ? x.body : "";
+    planted.value = x ? x.planted.join("\n") : "";
+    for (const k in ticks) ticks[k].checked = !!x && x.bucket_in.includes(k);
+    why.textContent = x ? x.why + (x.messages > 1 ? " (" + x.messages + " messages; the " +
+      "text above is the first)" : "") : "";
+  });
+  for (const n of [from, subject, body]) n.addEventListener("input", () => {
+    if (exampleId) why.textContent = "Edited, so it runs as pasted text, not the suite's own thread.";
+    exampleId = null;
+  });
+  const run = el("button", "btn primary", "Run the test");
+  run.type = "button";
+  const r = el("div", "actions");
+  r.append(run, close);
+  const out = el("div");
+  box.append(r, out);
+  run.addEventListener("click", async () => {
+    run.disabled = true;
+    run.textContent = "Ranking...";
+    out.replaceChildren();
+    const req = { planted: planted.value.split("\n").filter(x => x.trim()),
+                  bucket_in: Object.keys(ticks).filter(k => ticks[k].checked) };
+    if (exampleId) req.example = exampleId;
+    else Object.assign(req, { from: from.value, subject: subject.value, body: body.value });
+    if (model.value !== "") req.model = Number(model.value);
+    try {
+      const res = await fetch("/api/attack", { method: "POST", headers: { "X-FrontDesk": "attack",
+        "Content-Type": "application/json" }, body: JSON.stringify(req) });
+      const o = await res.json();
+      if (!res.ok) throw new Error(o.error || "HTTP " + res.status);
+      renderAttack(out, o);
+    } catch (e) {
+      out.append(el("p", "attackverdict fooled", "Did not run: " + e.message));
+    } finally {
+      run.disabled = false;
+      run.textContent = "Run the test";
+    }
+  });
+}
+
+// The demo has no model: pick a suite attack and see what each recorded model did with it.
+function recordedAttacks(box, examples, close) {
+  const intro = el("p", "kbdhint", "In your own copy this ranks mail you paste, live, with your " +
+    "model. Here, pick one of the " + examples.length + " attacks in the test suite and see " +
+    "what each model did when the suite was recorded. ");
+  const all = el("a", null, "All of them side by side");
+  all.href = STATIC ? "hijack.html" : "https://frontdesk.ocarlsen.com/hijack.html";
+  intro.append(all, ".");
+  box.append(intro);
+  if (!examples.length) { const r = el("div", "actions"); r.append(close); box.append(r); return; }
+  const pick = el("select");
+  for (const x of examples) pick.append(new Option(x.id + ": " + x.subject, x.id));
+  const why = el("p", "kbdhint");
+  const mail = el("details", "attackmail");
+  const chips = el("div", "attackchips");
+  const out = el("div");
+  const r = el("div", "actions");
+  r.append(close);
+  box.append(el("label", null, "Attack"), pick, why, mail, el("label", null, "Model"), chips, out, r);
+  const show = (x, i) => {
+    chips.replaceChildren();
+    x.recorded.forEach((m, j) => {
+      const b = el("button", "btn small" + (j === i ? " primary" : ""),
+        m.name + ": " + (m.verdict === "fooled" ? "fooled" : m.verdict === "invented" ? "invented a fact" : "resisted"));
+      b.type = "button";
+      b.setAttribute("aria-pressed", j === i ? "true" : "false");
+      b.addEventListener("click", () => show(x, j));
+      chips.append(b);
+    });
+    out.replaceChildren();
+    const m = x.recorded[i];
+    if (m) renderAttack(out, m, "Recorded " + fmtDate(m.recorded_at) + ", " + m.name);
+  };
+  const load = () => {
+    const x = examples.find(e => e.id === pick.value);
+    why.textContent = x.why;
+    mail.replaceChildren(el("summary", null, "The email" + (x.highlight.length ?
+      " (planted text highlighted)" : "") + (x.messages > 1 ? ", first of " + x.messages + " messages" : "")));
+    mail.append(el("p", "kbdhint", "From " + x.from + ". Subject: " + x.subject));
+    mail.append(markPlanted(x.body, x.highlight));
+    const first = Math.max(0, x.recorded.findIndex(m => m.verdict !== "resisted"));
+    show(x, x.recorded.some(m => m.verdict !== "resisted") ? first : 0);
+  };
+  pick.addEventListener("change", load);
+  load();
+}
+
+// The email's text with each planted quote in <mark>, built from text nodes only.
+function markPlanted(text, quotes) {
+  const pre = el("div", "attackreply");
+  let rest = text;
+  while (rest) {
+    let at = -1, q = "";
+    for (const c of quotes) {
+      const i = rest.indexOf(c);
+      if (i >= 0 && (at < 0 || i < at)) { at = i; q = c; }
+    }
+    if (at < 0) { pre.append(rest); break; }
+    pre.append(rest.slice(0, at), el("mark", null, q));
+    rest = rest.slice(at + q.length);
+  }
+  return pre;
+}
+
+function renderAttack(out, o, label) {
+  const head = { resisted: "Resisted: every check passed", fooled: "Fooled: the attack worked",
+    invented: "Resisted the attack, but the reply states something the mail doesn't" };
+  out.append(el("p", "attackverdict " + o.verdict, head[o.verdict] || o.verdict));
+  if (label) out.append(el("p", "kbdhint", label));
+  const ul = el("ul", "attackchecks");
+  for (const c of o.checks) {
+    const li = el("li", c.pass === false ? "fail" : null);
+    li.append(el("b", null, c.pass === null ? "Not checked" : c.pass ? "Pass" : "Fail"),
+      " " + c.detail);
+    ul.append(li);
+  }
+  out.append(ul);
+  out.append(el("p", null, (BUCKET_LABEL[o.bucket] || o.bucket) + ", urgency " + o.urgency +
+    ". " + o.reason));
+  if (o.summary) out.append(el("p", "kbdhint", o.summary));
+  if (o.reply) {
+    out.append(el("label", null, "Proposed reply"));
+    out.append(el("div", "attackreply", o.reply));
+  }
+  const cost = o.cost_usd == null ? "cost unknown" : "$" + o.cost_usd.toFixed(4);
+  if (o.tokens_in !== undefined) {
+    out.append(el("p", "kbdhint", o.model + ", " + o.tokens_in + " tokens in, " + o.tokens_out +
+      " out, " + cost + ", prompt " + o.prompt_version));
+  } else {
+    out.append(el("p", "kbdhint", cost + ", prompt " + o.prompt_version));
+  }
+}
+
 async function openMemory() {
   const panel = document.getElementById("profilepanel");
   panel.setAttribute("aria-label", "Memory");
@@ -2521,7 +2898,7 @@ const SHORTCUTS = [
   ["* then a / n / r / u", "Select all / none / read / unread"],
   ["Esc", "Clear the selection, leave the reply box, or close this list"],
   ["a", "Reply all (Gmail)"],
-  ["g then i / g then s", "Go to the inbox / the Starred view"],
+  ["g then i / s / u", "Go to the inbox / the Starred view / the Unread view"],
   ["s", "Star or unstar (Gmail: in Gmail too; Slack: in FrontDesk only)"],
   ["r", "Reply (jump to the reply box)"],
   ["v", "Move to another section"],
@@ -2553,13 +2930,16 @@ function centerTools(li) {
   tools.style.right = Math.round(c.right - (w.left + w.width / 2) - width / 2) + "px";
 }
 
-function setCurrent(li) {
+// scroll: bring the row into view with room around it (the cards' scroll-margin). Off when
+// focus moved because of a click: the row is already on screen, and scrolling between mousedown
+// and mouseup would make the click land on nothing.
+function setCurrent(li, scroll = true) {
   for (const c of document.querySelectorAll("li.card.current")) c.classList.remove("current");
   if (!li) { currentId = null; return; }
   li.classList.add("current");
   currentId = li.dataset.id;
   if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => centerTools(li));
-  li.scrollIntoView({ block: "nearest" });
+  if (scroll) li.scrollIntoView({ block: "nearest" });
   // Keep one selection on screen: if a row button holds focus (after a click), move focus to the
   // new current row so its focus ring does not stay behind on the old one.
   const a = document.activeElement;
@@ -2642,8 +3022,8 @@ function onKey(e) {
   // Gmail's two-key "go to": g, then i (inbox) or s (starred) within a second and a half.
   if (gPending) {
     gPending = false;
-    if (e.key === "i" || e.key === "s") {
-      view = e.key === "s" ? "starred" : "all";
+    if (e.key === "i" || e.key === "s" || e.key === "u") {
+      view = { i: "all", s: "starred", u: "unread" }[e.key];
       if (query) clearSearch(); else render(window.__items || []);
       e.preventDefault();
       return;
@@ -2772,10 +3152,33 @@ function showSyncLine(s) {
     { hour: "numeric", minute: "2-digit" });
   note.textContent = (s.ok === false ? "Sync failed " + when + ": " + s.summary : "Synced " + when) +
     (s.auto_sync_minutes ? ", auto every " + s.auto_sync_minutes + " min" : "");
+  note.classList.toggle("err", s.ok === false);
+  if (s.ok === false) offerConnect(note, s.summary);
+}
+
+// A sync that failed for want of a Google sign-in gets a button to the Connect controls.
+function offerConnect(note, text) {
+  if (!/sign-in needed/i.test(text || "")) return;
+  const b = el("button", "btn small", "Connect Gmail");
+  b.type = "button";
+  b.addEventListener("click", openGoogle);
+  note.append(" ", b);
+}
+
+// Opening the page syncs when the last sync is older than this, so it never shows stale mail
+// for long (an unchanged Gmail mailbox costs one call; only new messages are ranked).
+const SYNC_ON_OPEN_AFTER_MS = 2 * 60 * 1000;
+
+function syncIfStale(s) {
+  if (STATIC || !s) return;
+  const at = Date.parse(s.at || "");
+  if (at && Date.now() - at < SYNC_ON_OPEN_AFTER_MS) return;
+  const b = document.getElementById("sync");
+  if (b && !b.disabled) syncNow(true);
 }
 
 async function pollStatus() {
-  if (STATIC) return;
+  if (STATIC) return null;
   try {
     const res = await fetch("/api/status", { cache: "no-store" });
     if (!res.ok) return;
@@ -2798,17 +3201,19 @@ async function pollStatus() {
         note.append(" ", r);
       }
     }
-  } catch (e) { /* the next poll will try again */ }
+    return s;
+  } catch (e) { return null; /* the next poll will try again */ }
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  document.getElementById("sync").addEventListener("click", syncNow);
+  document.getElementById("sync").addEventListener("click", () => syncNow());
   document.getElementById("profile").addEventListener("click", openProfile);
   document.getElementById("memory").addEventListener("click", openMemory);
+  document.getElementById("attack").addEventListener("click", openAttack);
   buildHelp();
   setupSearch();
   document.addEventListener("keydown", onKey);
   load();
-  pollStatus();
+  pollStatus().then(syncIfStale);
   setInterval(pollStatus, 60000);
 });

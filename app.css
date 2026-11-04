@@ -9,6 +9,7 @@
   --shadow: 0 1px 2px rgba(20, 25, 35, .06), 0 2px 8px rgba(20, 25, 35, .05);
   --field: #f6f7f9;
   --u5: #d1372b; --u4: #e07a1f; --u3: #c9a227; --u2: #6b8fc9; --u1: #a3abb5;
+  --err-bg: #fdecea; --err-text: #a12b20; --err-line: #f3c2bc;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -22,6 +23,7 @@
     --shadow: 0 1px 2px rgba(0, 0, 0, .4);
     --field: #16181c;
     --u5: #ff6b5e; --u4: #ff9f4a; --u3: #e3c349; --u2: #86a8e0; --u1: #6c7480;
+    --err-bg: #3a1d1b; --err-text: #ffb4ab; --err-line: #6b2c27;
   }
 }
 * { box-sizing: border-box; }
@@ -41,7 +43,7 @@ body {
 .counts { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 14px;
   color: var(--muted); font-size: 13px; }
 .counts b { color: var(--text); font-weight: 600; }
-main { max-width: 860px; margin: 0 auto; padding: 0 16px 48px; }
+main { max-width: 860px; margin: 0 auto; padding: 0 16px 96px; }   /* the last row can rise */
 /* Search: its own full-width row under the header line. */
 .top .search { flex: 1 1 100%; box-sizing: border-box; height: 38px; padding: 0 12px; font: inherit;
   font-size: 15px; color: var(--text); background: var(--card); border: 1px solid var(--line);
@@ -139,9 +141,15 @@ section > details > summary { cursor: pointer; list-style-position: inside; }
   .msg-head .at { display: none; }
 }
 
-.syncbar { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.syncbar { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  justify-content: flex-end; }
 .syncnote { color: var(--muted); font-size: .85em; }
+/* A failed sync stands out: its own red balloon, not muted header text. */
+.syncnote.err { flex: 1 1 260px; background: var(--err-bg); color: var(--err-text); border: 1px solid var(--err-line);
+  border-radius: 10px; padding: 5px 10px; }
 .syncbar .btn[disabled] { opacity: .6; cursor: progress; }
+/* A long sync message wraps; the buttons beside it keep their size. */
+.syncbar > .btn, .syncnote .btn, .syncbar > .kbdhint { white-space: nowrap; flex-shrink: 0; }
 
 .sechead { display: flex; align-items: baseline; justify-content: space-between; }
 .linkbtn { background: none; border: 0; padding: 0; color: var(--accent, #3b5bdb); cursor: pointer;
@@ -179,6 +187,24 @@ li.card.current { box-shadow: inset 4px 0 0 var(--accent); }
   box-sizing: border-box; max-height: calc(100vh - 32px); overflow-y: auto; }
 /* The shortcut list outgrew a short window: wider, so most lines fit on one, and it scrolls. */
 .helpbox.keysbox { max-width: 640px; }
+/* Test an attack: a form and its result, so wider than the other panels. */
+.helpbox.attackbox { max-width: 720px; }
+.attackbox label { display: block; margin: 10px 0 4px; font-size: .9em; color: var(--muted); }
+.attackbox input[type=text], .attackbox select, .attackbox textarea { width: 100%;
+  box-sizing: border-box; font: inherit; }
+.attackbox .buckets label { display: inline-flex; gap: 4px; margin: 0 14px 0 0; color: var(--text); }
+.attackverdict { font-weight: 650; border-radius: 8px; padding: 6px 10px; margin: 14px 0 8px; }
+.attackverdict.fooled { background: var(--err-bg); color: var(--err-text); border: 1px solid var(--err-line); }
+.attackverdict.resisted { background: var(--field); border: 1px solid var(--line); }
+.attackverdict.invented { background: var(--field); border: 1px solid var(--u4); }
+.attackmail { margin: 8px 0; }
+.attackmail summary { cursor: pointer; color: var(--accent); }
+.attackmail mark { background: var(--err-bg); color: var(--err-text); border-radius: 3px; }
+.attackchips { display: flex; flex-wrap: wrap; gap: 6px; }
+.attackchecks { margin: 0 0 10px; padding-left: 18px; }
+.attackchecks .fail { color: var(--err-text); }
+.attackreply { white-space: pre-wrap; background: var(--field); border: 1px solid var(--line);
+  border-radius: 8px; padding: 8px 10px; overflow-wrap: anywhere; }
 .helpbox h2 { margin: 0 0 10px; font-size: 1rem; }
 .helpbox dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; }
 .helpbox dt { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .9em; }
@@ -235,6 +261,8 @@ li.card:not(.unread) .sender { font-weight: 500; }
 .situationitem { background: var(--field); border: 1px solid var(--line); border-radius: 8px;
   padding: 6px 10px; margin: 8px 0; }
 .situationtext { margin: 2px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.situationstate { margin: 2px 0; }
+.situationitem.closed .situationtext { color: var(--muted); }
 
 /* Text boxes size to their content (app.js fitText is the fallback); long ones scroll. */
 textarea { field-sizing: content; min-height: 2.6em; max-height: 70vh; overflow-y: auto; }
@@ -295,6 +323,11 @@ body.selecting .card > .rowcheck { display: block; }
 /* A row with no reason line (not ranked yet) is one line tall: make room for both. */
 .card:not(:has(.reason)) > .row { min-height: 64px; }
 .card.selected { background: color-mix(in srgb, var(--accent) 9%, var(--card)); }
+/* Moving with j/k scrolls the current row only as far as it must ("nearest"); these margins
+   make that leave about a row of room below it and some above, so it never sits on the edge
+   of the window, and never under the sticky selection bar. */
+.card { scroll-margin-top: 16px; scroll-margin-bottom: 88px; }
+body.selecting .card { scroll-margin-top: 72px; }
 .selbar { position: sticky; top: 0; z-index: 20; max-width: 828px; margin: 0 auto 8px;
   box-sizing: border-box; display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
   padding: 8px 12px; background: var(--card); border-radius: 10px; box-shadow: var(--shadow); }
@@ -323,7 +356,8 @@ body.selecting .card > .rowcheck { display: block; }
   .selbar .selword { display: none; }
   .selbar .selclear { width: 44px; }
   .selbar .selmove { width: 96px; padding: 0 4px; font-size: 14px; }
-  body.selecting main { padding-bottom: 96px; }   /* the last rows stay above the bar */
+  body.selecting main { padding-bottom: 168px; }   /* the last rows stay above the bar */
+  body.selecting .card { scroll-margin-top: 16px; scroll-margin-bottom: 168px; }   /* bar is below */
   .rowcheck { width: 16px; height: 16px; left: 11px; top: 38px; }
 }
 .replyhead { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
@@ -340,7 +374,7 @@ svg.icons { position: absolute; width: 0; height: 0; overflow: hidden; }
 .btn.btn-star.on::first-letter { color: var(--u3); }
 .tag { display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: 4px; font-size: .9em;
   background: var(--field); border: 1px solid var(--line); }
-.counts .starview { font-size: inherit; }
+.counts .starview, .counts .unreadview { font-size: inherit; }
 .swipe-reveal { display: none; grid-row: 1; grid-column: 1 / -1; align-items: center;
   justify-content: flex-end; padding: 0 18px; border-radius: 10px; font-weight: 600;
   background: color-mix(in srgb, var(--accent) 22%, var(--card)); color: var(--text); }
@@ -361,6 +395,9 @@ svg.icons { position: absolute; width: 0; height: 0; overflow: hidden; }
   .btn { padding: 10px 12px; }
   .syncbar .btn { white-space: nowrap; }
   .syncbar .kbdhint { display: none; }   /* no keyboard on a phone */
+  /* Four header buttons on one row at 375px even with wider fonts (Linux, Android). */
+  .syncbar { gap: 6px; }
+  .syncbar > .btn { padding: 10px 9px; }
   .top .search { height: 44px; font-size: 16px; }   /* 16px: iOS zooms into smaller inputs */
 }
 
