@@ -1540,7 +1540,10 @@ async function buildAsk(item, replyBox, body, summaryEl, people) {
   const row = el("div", "actions");
   const pick = el("select", "modelpick");
   pick.title = "Model for Ask (Second opinion and Polish use the review model)";
-  pick.append(Object.assign(el("option", null, "Default model"), { value: "" }));
+  const dflt = Object.assign(el("option", null, "Default model"), { value: "" });
+  pick.append(dflt);
+  if (!STATIC) fetch("/api/defaults", { cache: "no-store" }).then(r => r.ok ? r.json() : null)
+    .then(d => { if (d) dflt.textContent = "Default (" + d.ask + ")"; }).catch(() => {});
   fetch("/api/models", { cache: "no-store" }).then(r => r.ok ? r.json() : []).then(ms => {
     for (const m of ms) pick.append(Object.assign(el("option", null, m.label), { value: String(m.index) }));
   }).catch(() => {});
@@ -2532,7 +2535,11 @@ async function openAttack() {
   }
   box.append(buckets);
   const model = el("select");
-  model.append(new Option("Default model", ""));
+  model.append(new Option("Default ranking model", ""));
+  try {
+    const d = await (await fetch("/api/defaults", { cache: "no-store" })).json();
+    model.options[0].textContent = "Default ranking model (" + d.rank + ")";
+  } catch (e) { /* the plain label still works */ }
   try {
     for (const m of await (await fetch("/api/models", { cache: "no-store" })).json())
       model.append(new Option(m.label, String(m.index)));
