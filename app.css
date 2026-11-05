@@ -10,6 +10,7 @@
   --field: #f6f7f9;
   --u5: #d1372b; --u4: #e07a1f; --u3: #c9a227; --u2: #6b8fc9; --u1: #a3abb5;
   --err-bg: #fdecea; --err-text: #a12b20; --err-line: #f3c2bc;
+  --ok-text: #1a7f37;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -24,6 +25,7 @@
     --field: #16181c;
     --u5: #ff6b5e; --u4: #ff9f4a; --u3: #e3c349; --u2: #86a8e0; --u1: #6c7480;
     --err-bg: #3a1d1b; --err-text: #ffb4ab; --err-line: #6b2c27;
+    --ok-text: #6fdd8b;
   }
 }
 * { box-sizing: border-box; }
@@ -198,6 +200,15 @@ li.card.current { box-shadow: inset 4px 0 0 var(--accent); }
   box-sizing: border-box; font: inherit; }
 .attackbox .buckets label { display: inline-flex; gap: 4px; margin: 0 14px 0 0; color: var(--text); }
 .attackverdict { font-weight: 650; border-radius: 8px; padding: 6px 10px; margin: 14px 0 8px; }
+/* Google permissions: connected in green, anything else in red. */
+.gstate { font-weight: 600; }
+.gstate.ok { color: var(--ok-text); }
+.gstate.bad { color: var(--err-text); }
+/* Account sits in the counts row, styled like Starred and Unread; red, with a verb, when a
+   sign-in expired. */
+.accountlink { margin-left: auto; font-size: 13px; color: var(--accent); text-decoration: none; }
+.accountlink:hover { text-decoration: underline; }
+.accountlink.attention { color: var(--err-text); font-weight: 600; }
 .attackverdict.fooled { background: var(--err-bg); color: var(--err-text); border: 1px solid var(--err-line); }
 .attackverdict.resisted { background: var(--field); border: 1px solid var(--line); }
 .attackverdict.invented { background: var(--field); border: 1px solid var(--u4); }

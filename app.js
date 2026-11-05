@@ -536,6 +536,12 @@ let toastTimer = null;
 function toast(text, undoLabel, onUndo) {
   const t = document.getElementById("toast");
   t.replaceChildren(el("span", null, text));
+  // Any action that failed for want of a Google sign-in offers the way back in, like the sync line.
+  if (!onUndo && /sign-in needed/i.test(text || "") && !STATIC) {
+    undoLabel = "Account";
+    onUndo = openGoogle;
+    pollStatus();   // the server now knows the sign-in expired: turn Account red
+  }
   if (onUndo) {
     const u = el("button", "linkbtn", undoLabel);
     u.type = "button";
@@ -2401,15 +2407,17 @@ async function renderGoogle(box) {
   const note = el("p", "kbdhint");
   for (const [kind, name, what] of GOOGLE_KINDS) {
     const li = el("div", "situationitem");
-    li.append(el("p", "situationtext", name + ": " + (st[kind] ? "connected" : "not connected")),
-      el("p", "kbdhint", what));
+    const state = st[kind] ? "connected" : st[kind + "_expired"] ? "sign-in expired" : "not connected";
+    const line = el("p", "situationtext", name + ": ");
+    line.append(el("span", "gstate " + (st[kind] ? "ok" : "bad"), state));
+    li.append(line, el("p", "kbdhint", what));
     const row = el("div", "actions");
     const go = el("button", "btn small" + (st[kind] ? "" : " primary"),
-      st[kind] ? "Reconnect" : "Connect");
+      st[kind] || st[kind + "_expired"] ? "Reconnect" : "Connect");
     go.type = "button";
     go.addEventListener("click", () => connectGoogle(kind, box, note));
     row.append(go);
-    if (st[kind]) {
+    if (st[kind] || st[kind + "_expired"]) {
       const off = el("button", "btn small", "Disconnect");
       off.type = "button";
       off.title = "Delete this permission's sign-in from this computer";
@@ -2428,6 +2436,7 @@ async function renderGoogle(box) {
     box.append(li);
   }
   box.append(note);
+  pollStatus();   // the header's Account link follows what the panel now shows
 }
 
 async function connectGoogle(kind, box, note) {
@@ -3254,7 +3263,7 @@ function showSyncLine(s) {
 // A sync that failed for want of a Google sign-in gets a button to the Connect controls.
 function offerConnect(note, text) {
   if (!/sign-in needed/i.test(text || "")) return;
-  const b = el("button", "btn small", "Connect Gmail");
+  const b = el("button", "btn small", "Account");
   b.type = "button";
   b.addEventListener("click", openGoogle);
   note.append(" ", b);
@@ -3285,6 +3294,11 @@ async function pollStatus() {
     lastSyncSeen = mark;
     slackSynced = s.slack === true;
     showSyncLine(s);
+    const acct = document.getElementById("account");
+    acct.classList.toggle("attention", s.login === true);
+    acct.textContent = s.login === true ? "\u25cf Account: sign in again" : "Account";
+    acct.title = s.login === true ? "A Gmail sign-in expired: click to reconnect"
+      : "Google sign-in: connect or reconnect Gmail";
     if (changed) {
       if (!busy()) {
         await load();
@@ -3305,6 +3319,8 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("profile").addEventListener("click", openProfile);
   document.getElementById("memory").addEventListener("click", openMemory);
   document.getElementById("attack").addEventListener("click", openAttack);
+  // In the demo the panel says connecting is off: the header stays the same as your own copy's.
+  document.getElementById("account").addEventListener("click", e => { e.preventDefault(); openGoogle(); });
   buildHelp();
   setupSearch();
   document.addEventListener("keydown", onKey);
